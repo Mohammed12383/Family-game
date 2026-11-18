@@ -246,18 +246,46 @@ button:disabled { cursor: default; }
 .pill.is-removed, .pill.is-removed:disabled { border-style: dashed; opacity: 0.22; }
 .pill.is-dim, .pill.is-dim:disabled { opacity: 0.32; }
 
-.pill-input {
-  width: 100%;
+.field {
   min-height: var(--pill-h);
-  padding: 8px 20px;
-  border: 1.5px solid var(--ink);
+  padding-inline: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1.5px solid var(--hair-2);
   border-radius: 999px;
+  background: var(--paper-hi);
+  cursor: text;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.field:hover { border-color: var(--ink-3); }
+.field:focus-within { border-color: var(--orange); box-shadow: 0 0 0 3px var(--orange-wash); }
+.field-n {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--paper-shade);
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.field-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  outline: none;
   background: transparent;
+  color: var(--ink);
   font-size: 15px;
   text-align: center;
 }
-.pill-input:focus { outline: none; border-color: var(--orange); box-shadow: 0 0 0 3px var(--orange-wash); }
-.field { display: block; }
+.field-input::placeholder { color: var(--ink-3); opacity: 1; }
+.field-ic { flex: none; display: grid; color: var(--ink-3); }
+.field-ic svg { width: 16px; height: 16px; }
+.field:focus-within .field-ic { color: var(--orange-deep); }
 
 .note {
   margin: 22px 0 0;

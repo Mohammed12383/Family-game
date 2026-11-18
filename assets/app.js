@@ -60,6 +60,7 @@
     scramble: svg('<path d="M4 7h3c2.2 0 3.3 1.2 4.6 3.6M4 17h3c2.2 0 3.3-1.2 4.6-3.6M12.4 13.6C13.7 16 14.8 17 17 17h3M12.4 10.4C13.7 8 14.8 7 17 7h3M17.5 4.5 20 7l-2.5 2.5M17.5 14.5 20 17l-2.5 2.5"/>'),
     fog: svg('<path d="M7 14.5h10a3.4 3.4 0 0 0 .3-6.8A5 5 0 0 0 7.6 8.6 3 3 0 0 0 7 14.5z"/><path d="M5 18h10M9 21h10"/>'),
     back: svg('<path d="m9 6 6 6-6 6"/>'),
+    pencil: svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>'),
     board: svg('<path d="M5 20V10M12 20V4M19 20v-7"/>'),
     cards: svg('<rect x="4" y="6" width="11" height="14" rx="2"/><path d="M9 3.5h9a2 2 0 0 1 2 2V17"/>')
   };
@@ -356,9 +357,17 @@
       body = `<div class="opts opts-3">${TEAM_OPTIONS.map((o) => pill({ act: 'teams', id: o.n, label: o.label, pressed: st.teams === o.n })).join('')}</div>
         <p class="note">الأفضل ٢ إلى ٤ أشخاص في الفريق. مثلاً ٣٠ شخصاً = ١٠ فرق من ٣ أشخاص.</p>`;
     } else if (step.key === 'names') {
-      const fields = st.names.slice(0, st.teams).map((nm, i) =>
-        `<label class="field"><span class="sr">اسم الفريق ${ar(i + 1)}</span><input class="pill-input" id="team-name-${i}" data-name="${i}" value="${esc(nm)}" maxlength="18" placeholder="الفريق ${ar(i + 1)}" autocomplete="off" enterkeyhint="next"></label>`).join('');
-      body = `<div class="opts${st.teams > 4 ? ' short' : ''}">${fields}</div><p class="note">اكتبوا ما تشاؤون، أو اتركوا الأسماء كما هي.</p>`;
+      /* empty field = the suggested name, shown as grey placeholder text so the field reads as typeable */
+      const fields = st.names.slice(0, st.teams).map((nm, i) => {
+        const val = nm === DEFAULT_NAMES[i] ? '' : nm;
+        return `<label class="field" for="team-name-${i}">
+          <span class="field-n" aria-hidden="true">${ar(i + 1)}</span>
+          <input class="field-input" id="team-name-${i}" data-name="${i}" value="${esc(val)}" maxlength="18" placeholder="${esc(DEFAULT_NAMES[i])}" autocomplete="off" enterkeyhint="${i < st.teams - 1 ? 'next' : 'done'}" aria-label="اسم الفريق ${ar(i + 1)}">
+          <span class="field-ic" aria-hidden="true">${ICON.pencil}</span>
+        </label>`;
+      }).join('');
+      body = `<div class="opts${st.teams > 4 ? ' short' : ''}">${fields}</div>
+        <p class="note">اضغطوا على أي خانة واكتبوا اسم فريقكم. الخانة الفارغة تأخذ الاسم المكتوب بالرمادي.</p>`;
     } else if (step.key === 'time') {
       body = `<div class="opts">${TIME_OPTIONS.map((n) => pill({ act: 'time', id: n, label: `${ar(n)} ثانية`, pressed: st.time === n })).join('')}</div>
         <p class="note">يُحسب الوقت من لحظة ظهور السؤال، ويمكن زيادته ببطاقة الوقت الإضافي.</p>`;

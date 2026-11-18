@@ -498,6 +498,29 @@ test('refreshing the page mid-question keeps the question, scores and time', asy
   await context.close();
 });
 
+test('team names: the fields are typeable, typed names are used, empty fields take the suggested name', async () => {
+  const { page, context, errors } = await open();
+  for (const c of ['general', 'geo', 'islamic']) await page.click(`[data-act="cat"][data-id="${c}"]`);
+  await page.click('#go');
+  await page.click('[data-act="teams"][data-id="3"]');
+  await page.click('#go');
+  assert.equal(await page.isEditable('#team-name-0'), true);
+  assert.equal(await page.inputValue('#team-name-0'), '', 'field starts empty so typing is obvious');
+  assert.equal(await page.getAttribute('#team-name-0', 'placeholder'), 'الصقور');
+  await page.click('#team-name-0');
+  await page.keyboard.type('عائلة عودة');
+  await page.click('.field:has(#team-name-2)');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'team-name-2', 'tapping anywhere on the field focuses it');
+  await page.keyboard.type('ازدهار');
+  for (let i = 0; i < 3; i++) await page.click('#go');
+  await page.click('#go');
+  const s = await state(page);
+  assert.deepEqual(s.game.teams.map((t) => t.name), ['عائلة عودة', 'الفهود', 'ازدهار']);
+  assert.match(await page.textContent('#scores'), /عائلة عودة/);
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
 test('team names are shown as plain text, never as page code', async () => {
   const { page, context, errors } = await open();
   await setup(page, { names: ['<b>x</b>', 'فريق "٢"'] });
