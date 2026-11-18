@@ -1,4 +1,4 @@
-/* لمّة العائلة — منطق اللعبة */
+/* مسابقة عودة ازدهار — منطق اللعبة */
 (function () {
   'use strict';
 
@@ -18,20 +18,30 @@
   const MIN_CATS = 3;
   const EXTRA_TIME = 15;
   const STEAL_MIN_TIME = 10;
+  const FOG_SECONDS = 10;
+  const SCRAMBLE_EVERY = 3;
   const STORE_KEY = 'lamma-family-v1';
 
+  /* help = used by the answering team on its own turn; sabotage = used by the other teams against it */
   const CARDS = {
-    time:   { name: 'وقت إضافي',    kind: 'self',   desc: 'تضيف ١٥ ثانية إلى وقت السؤال الحالي.' },
-    double: { name: 'نقاط مضاعفة',  kind: 'self',   desc: 'تضاعف نقاط السؤال إذا كانت إجابتكم صحيحة.' },
-    fifty:  { name: 'حذف إجابتين',  kind: 'self',   desc: 'تحذف إجابتين خاطئتين فيبقى خياران فقط.' },
-    life:   { name: 'فرصة ثانية',   kind: 'self',   desc: 'إذا أخطأتم تحصلون على محاولة أخرى في نفس السؤال.' },
-    swap:   { name: 'تغيير السؤال', kind: 'self',   desc: 'تستبدل السؤال بآخر من نفس الفئة والصعوبة، ويبدأ الوقت من جديد.' },
-    shield: { name: 'الدرع',        kind: 'self',   desc: 'يحميكم من بطاقات المنافسين في هذا السؤال، ويُبطل الكذبة إن استُخدمت عليكم.' },
-    lie:    { name: 'الكذبة',       kind: 'attack', desc: 'يرى فريقكم الإجابة سراً، ثم يحاول تضليل الفريق المجيب. إن أخطأوا تأخذون نقاط السؤال.' },
-    rush:   { name: 'الاستعجال',    kind: 'attack', desc: 'تقطع نصف الوقت المتبقي على الفريق المجيب.' },
-    steal:  { name: 'السرقة',       kind: 'attack', desc: 'إذا أخطأ الفريق المجيب تجيبون أنتم على نفس السؤال وتأخذون نقاطه.' }
+    time:     { name: 'وقت إضافي',    kind: 'help',     desc: 'تضيف ١٥ ثانية إلى وقت السؤال الحالي.' },
+    double:   { name: 'نقاط مضاعفة',  kind: 'help',     desc: 'تضاعف نقاط السؤال إذا كانت إجابتكم صحيحة.' },
+    fifty:    { name: 'حذف إجابتين',  kind: 'help',     desc: 'تحذف إجابتين خاطئتين فيبقى خياران فقط.' },
+    life:     { name: 'فرصة ثانية',   kind: 'help',     desc: 'إذا أخطأتم تحصلون على محاولة أخرى في نفس السؤال.' },
+    swap:     { name: 'تغيير السؤال', kind: 'help',     desc: 'تستبدل السؤال بآخر من نفس الفئة والصعوبة، ويبدأ الوقت من جديد ويزول الخلط والضباب والاستعجال.' },
+    shield:   { name: 'الدرع',        kind: 'help',     desc: 'يمنع التخريب عنكم في هذا السؤال، ويُبطل الكذبة والخلط والضباب إن استُخدمت عليكم.' },
+    lie:      { name: 'الكذبة',       kind: 'sabotage', desc: 'يرى فريقكم الإجابة سراً ثم يحاول تضليل الفريق المجيب. إن أخطأوا تأخذون نقاط السؤال.' },
+    rush:     { name: 'الاستعجال',    kind: 'sabotage', desc: 'تقطع نصف الوقت المتبقي على الفريق المجيب.' },
+    freeze:   { name: 'التجميد',      kind: 'sabotage', desc: 'يمنع الفريق المجيب من استخدام بطاقات المساعدة في هذا السؤال، ومنها الدرع.' },
+    scramble: { name: 'الخلط',        kind: 'sabotage', desc: 'تتبدّل أماكن الإجابات كل ٣ ثوانٍ حتى يجيب الفريق.' },
+    fog:      { name: 'الضباب',       kind: 'sabotage', desc: 'تختفي الإجابات خلف ضباب ينقشع تدريجياً خلال ١٠ ثوانٍ.' },
+    steal:    { name: 'السرقة',       kind: 'sabotage', desc: 'إذا أخطأ الفريق المجيب تجيبون أنتم عن نفس السؤال وتأخذون نقاطه. تظهر تلقائياً عند الخطأ.' }
   };
-  const CARD_ORDER = ['time', 'double', 'fifty', 'life', 'swap', 'shield', 'lie', 'rush', 'steal'];
+  const CARD_ORDER = ['time', 'double', 'fifty', 'life', 'swap', 'shield', 'lie', 'rush', 'freeze', 'scramble', 'fog', 'steal'];
+  const HELP = CARD_ORDER.filter((id) => CARDS[id].kind === 'help');
+  const SABOTAGE = CARD_ORDER.filter((id) => CARDS[id].kind === 'sabotage');
+  /* which question field records each sabotage (one of each per question) */
+  const SABOTAGE_FIELD = { lie: 'lie', rush: 'rushBy', freeze: 'frozenBy', scramble: 'scrambleBy', fog: 'fogBy' };
 
   const svg = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
   const ICON = {
@@ -44,6 +54,9 @@
     lie: svg('<path d="M4.5 5.5h15v10.5h-8.5l-4.5 3.5V16h-2z"/><path d="M10 9.4a2 2 0 1 1 2.6 1.9c-.4.1-.6.5-.6.9v.3"/><path d="M12 14.4h.01"/>'),
     rush: svg('<path d="M13 3 5.5 13.5H11L10 21l7.5-10.5H12z"/>'),
     steal: svg('<path d="M7 4v8a5 5 0 0 0 10 0V4h-3.5v8a1.5 1.5 0 0 1-3 0V4z"/><path d="M7 7.5h3.5M13.5 7.5H17"/>'),
+    freeze: svg('<path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"/><path d="M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5"/>'),
+    scramble: svg('<path d="M4 7h3c2.2 0 3.3 1.2 4.6 3.6M4 17h3c2.2 0 3.3-1.2 4.6-3.6M12.4 13.6C13.7 16 14.8 17 17 17h3M12.4 10.4C13.7 8 14.8 7 17 7h3M17.5 4.5 20 7l-2.5 2.5M17.5 14.5 20 17l-2.5 2.5"/>'),
+    fog: svg('<path d="M7 14.5h10a3.4 3.4 0 0 0 .3-6.8A5 5 0 0 0 7.6 8.6 3 3 0 0 0 7 14.5z"/><path d="M5 18h10M9 21h10"/>'),
     back: svg('<path d="m9 6 6 6-6 6"/>'),
     board: svg('<path d="M5 20V10M12 20V4M19 20v-7"/>'),
     cards: svg('<rect x="4" y="6" width="11" height="14" rx="2"/><path d="M9 3.5h9a2 2 0 0 1 2 2V17"/>')
@@ -60,7 +73,7 @@
 
   /* ================= state ================= */
   let S = null;
-  const ui = { sheet: null, menu: false, lastKey: '', cardHint: null, confirmNew: false };
+  const ui = { sheet: null, menu: false, lastKey: '', cardHint: null, shuffled: false };
 
   function freshState() {
     return {
@@ -97,7 +110,6 @@
   }
 
   /* ================= helpers ================= */
-  const $ = (sel) => document.querySelector(sel);
   const el = {};
 
   function shuffle(a) {
@@ -116,10 +128,16 @@
   }
   function roundsWord(n) { return n <= 10 ? `${ar(n)} جولات` : `${ar(n)} جولة`; }
   function poolSize() { return S.settings.cats.reduce((sum, id) => sum + (CAT[id] ? CAT[id].q.length : 0), 0); }
+  /* keep the chosen number of rounds playable when categories or team count change */
+  function fixRounds() {
+    const st = S.settings;
+    if (st.rounds * st.teams <= poolSize()) return;
+    const ok = ROUND_OPTIONS.filter((n) => n * st.teams <= poolSize());
+    st.rounds = ok.length ? ok[ok.length - 1] : ROUND_OPTIONS[0];
+  }
 
   const G = () => S.game;
   const Q = () => (S.game ? S.game.q : null);
-  const turnTeam = () => S.game.teams[S.game.turn];
   const teamName = (i) => esc(S.game.teams[i].name);
 
   function unusedIdx(catId, d) {
@@ -153,8 +171,17 @@
       selected: null, removed: [], struck: [], picked: null, phase: 'answer',
       timeLeft: S.settings.time, timeMax: S.settings.time,
       double: false, life: false, lifeUsed: false, shield: false, lie: null, rushBy: null,
+      frozenBy: null, scrambleBy: null, scrambleOff: false, scrambleT: 0, order: [0, 1, 2, 3],
+      fogBy: null, fogLeft: 0,
       stealer: null, stealPicked: null, stealOk: false, stealTimeout: false, outcome: null, won: 0
     };
+  }
+  function displayOrder(q) {
+    return Array.isArray(q.order) && q.order.length === q.options.length ? q.order : q.options.map((_, i) => i);
+  }
+  function fogPx(q) {
+    if (q.fogBy == null || !(q.fogLeft > 0) || q.phase !== 'answer') return 0;
+    return 7 * (q.fogLeft / FOG_SECONDS);
   }
 
   function cardEnabled(id) { return S.settings.cards.includes(id); }
@@ -174,8 +201,9 @@
     if (!cardEnabled(id)) return no('غير مفعّلة');
     if (g.teams[ti].used.includes(id)) return no('استُخدمت');
     if (S.screen !== 'question' || !q || q.phase !== 'answer') return no('أثناء السؤال فقط');
-    if (CARDS[id].kind === 'self') {
+    if (CARDS[id].kind === 'help') {
       if (ti !== g.turn) return no('في دوركم فقط');
+      if (q.frozenBy != null) return no('مجمّدة في هذا السؤال');
       if (id === 'double' && q.double) return no('مفعّلة الآن');
       if (id === 'fifty' && q.removed.length) return no('مفعّلة الآن');
       if (id === 'fifty' && wrongLeft(q) < 2) return no('لا تكفي الخيارات');
@@ -185,11 +213,10 @@
       if (id === 'swap' && !unusedIdx(q.cat, q.d).length) return no('لا يوجد سؤال بديل');
     } else {
       if (ti === g.turn) return no('في دور المنافسين');
-      if (id === 'steal') return no('تظهر عند الخطأ');
-      if (q.shield) return no('الفريق محمي بالدرع');
-      if (id === 'lie' && q.lie != null) return no('استُخدمت كذبة على هذا السؤال');
-      if (id === 'rush' && q.rushBy != null) return no('استُخدم على هذا السؤال');
-      if (id === 'rush' && q.timeLeft < 6) return no('الوقت قليل أصلاً');
+      if (id === 'steal') return no('عند الخطأ');
+      if (q.shield) return no('محميون بالدرع');
+      if (q[SABOTAGE_FIELD[id]] != null) return no('استُخدمت على هذا السؤال');
+      if ((id === 'rush' || id === 'fog') && q.timeLeft < 6) return no('الوقت قليل أصلاً');
     }
     return { ok: true };
   }
@@ -252,6 +279,10 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => el.toast.classList.remove('on'), 2600);
   }
+  function hideToast() {
+    clearTimeout(toastTimer);
+    el.toast.classList.remove('on');
+  }
 
   /* ================= view pieces ================= */
   function head(eyebrow, title) {
@@ -309,7 +340,11 @@
       const hint = ui.cardHint && CARDS[ui.cardHint]
         ? `<b>${CARDS[ui.cardHint].name}:</b> ${CARDS[ui.cardHint].desc}`
         : 'كل فريق يستخدم كل بطاقة مرة واحدة فقط في اللعبة. اضغطوا على البطاقة لتفعيلها أو إلغائها.';
-      body = `<div class="opts opts-3">${CARD_ORDER.map((id) => pill({ act: 'card-toggle', id, label: CARDS[id].name, icon: ICON[id], pressed: st.cards.includes(id) })).join('')}</div>
+      const group = (ids) => ids.map((id) => pill({ act: 'card-toggle', id, label: CARDS[id].name, icon: ICON[id], pressed: st.cards.includes(id) })).join('');
+      body = `<p class="group-label"><b>بطاقات المساعدة</b> · يستخدمها الفريق في دوره</p>
+        <div class="opts opts-3 opts-tight">${group(HELP)}</div>
+        <p class="group-label"><b>بطاقات التخريب</b> · يستخدمها المنافسون ضد الفريق الذي يجيب</p>
+        <div class="opts opts-3 opts-tight">${group(SABOTAGE)}</div>
         <p class="note">${hint}</p>`;
     }
     return head(step.eyebrow, step.title) + body;
@@ -328,10 +363,14 @@
       disabled: pick.cat ? remaining(pick.cat, x.d) === 0 : false
     })).join('');
     const wide = st.cats.length > 4 ? 'opts-wide' : 'short';
+    const sabo = SABOTAGE.some(cardEnabled) && g.round === 1
+      ? '<p class="note">أثناء السؤال تستطيع الفرق الأخرى التخريب عليكم من زر «تخريب»، والدرع يحميكم.</p>'
+      : '';
     return head(`الجولة ${ar(g.round)} من ${ar(st.rounds)} · دور <b>فريق ${teamName(g.turn)}</b>`, 'اختاروا فئة السؤال')
       + `<div class="opts ${wide}">${cats}</div>`
       + `<p class="group-label">ثم الصعوبة</p>`
-      + `<div class="opts opts-3 opts-tight">${diffs}</div>`;
+      + `<div class="opts opts-3 opts-tight">${diffs}</div>`
+      + sabo;
   }
 
   /* ---------- question ---------- */
@@ -356,8 +395,15 @@
     if (q.shield) t.push('<span class="tag">الدرع مفعّل</span>');
     if (q.lie != null) t.push(q.shield
       ? `<span class="tag is-off">كذبة فريق ${teamName(q.lie)} أُبطلت</span>`
-      : `<span class="tag">كذبة من فريق ${teamName(q.lie)}</span>`);
-    if (q.rushBy != null) t.push(`<span class="tag">استعجال من فريق ${teamName(q.rushBy)}</span>`);
+      : `<span class="tag is-sabo">كذبة من فريق ${teamName(q.lie)}</span>`);
+    if (q.rushBy != null) t.push(`<span class="tag is-sabo">استعجال من فريق ${teamName(q.rushBy)}</span>`);
+    if (q.frozenBy != null) t.push(`<span class="tag is-sabo">تجميد من فريق ${teamName(q.frozenBy)}</span>`);
+    if (q.scrambleBy != null) t.push(q.scrambleOff
+      ? `<span class="tag is-off">خلط فريق ${teamName(q.scrambleBy)} أُبطل</span>`
+      : `<span class="tag is-sabo">خلط من فريق ${teamName(q.scrambleBy)}</span>`);
+    if (q.fogBy != null) t.push(q.fogOff
+      ? `<span class="tag is-off">ضباب فريق ${teamName(q.fogBy)} أُبطل</span>`
+      : `<span class="tag is-sabo">ضباب من فريق ${teamName(q.fogBy)}</span>`);
     return t.length ? `<div class="tags">${t.join('')}</div>` : '';
   }
 
@@ -392,11 +438,14 @@
 
     const interactive = q.phase === 'answer' || q.phase === 'steal';
     const short = q.options.every((o) => o.length <= 16) ? 'short' : '';
-    const opts = q.options.map((o, i) => {
+    const opts = displayOrder(q).map((i) => {
       const state = optState(i);
       const locked = !interactive || state !== '';
-      return `<button type="button" class="pill ${state}" id="opt-${i}" data-act="opt" data-id="${i}" aria-pressed="${q.selected === i ? 'true' : 'false'}" ${locked ? 'disabled' : ''}><span dir="auto">${esc(o)}</span></button>`;
+      return `<button type="button" class="pill ${state}" id="opt-${i}" data-act="opt" data-id="${i}" aria-pressed="${q.selected === i ? 'true' : 'false'}" ${locked ? 'disabled' : ''}><span dir="auto">${esc(q.options[i])}</span></button>`;
     }).join('');
+    const fog = fogPx(q);
+    const fx = `${fog > 0 ? ' is-fog' : ''}${ui.shuffled ? ' is-shuffled' : ''}`;
+    ui.shuffled = false;
 
     let below = '';
     if (q.phase === 'answer') below = cardChips();
@@ -405,22 +454,23 @@
         <div class="actions">${stealers().map((i) => `<button type="button" class="chip is-hot" data-act="steal" data-id="${i}">${ICON.steal}<span>سرقة · ${teamName(i)}</span></button>`).join('')}</div>`;
     }
 
-    return head(eyebrow, esc(q.text)) + tagsHtml() + `<div class="opts ${short}">${opts}</div>` + below;
+    return head(eyebrow, esc(q.text)) + tagsHtml()
+      + `<div class="opts ${short}${fx}" id="answers" style="--fog:${fog.toFixed(2)}px">${opts}</div>` + below;
   }
 
   function cardChips() {
     const g = G();
-    const selfCards = CARD_ORDER.filter((id) => CARDS[id].kind === 'self' && cardEnabled(id));
-    const attackCards = ['lie', 'rush'].filter(cardEnabled);
-    if (!selfCards.length && !attackCards.length) return '';
-    const mine = selfCards.filter((id) => hasCard(g.turn, id)).length;
-    const theirs = g.teams.some((_, i) => i !== g.turn && attackCards.some((id) => hasCard(i, id)));
+    const helpCards = HELP.filter(cardEnabled);
+    const saboCards = SABOTAGE.filter((id) => id !== 'steal' && cardEnabled(id));
+    if (!helpCards.length && !saboCards.length) return '';
+    const mine = helpCards.filter((id) => hasCard(g.turn, id)).length;
+    const theirs = g.teams.reduce((n, _, i) => n + (i === g.turn ? 0 : saboCards.filter((id) => hasCard(i, id)).length), 0);
     let out = '<div class="actions">';
-    if (selfCards.length) {
-      out += `<button type="button" class="chip" data-act="sheet-mine" ${mine ? '' : 'disabled'}>${ICON.cards}<span>بطاقات ${teamName(g.turn)}</span><span class="chip-n">${ar(mine)}</span></button>`;
+    if (helpCards.length) {
+      out += `<button type="button" class="chip" data-act="sheet-mine" ${mine ? '' : 'disabled'}>${ICON.cards}<span>مساعدة ${teamName(g.turn)}</span><span class="chip-n">${ar(mine)}</span></button>`;
     }
-    if (attackCards.length) {
-      out += `<button type="button" class="chip" data-act="sheet-theirs" ${theirs ? '' : 'disabled'}>${ICON.lie}<span>بطاقات المنافسين</span></button>`;
+    if (saboCards.length) {
+      out += `<button type="button" class="chip is-hot" data-act="sheet-theirs" ${theirs ? '' : 'disabled'}>${ICON.rush}<span>تخريب</span><span class="chip-n">${ar(theirs)}</span></button>`;
     }
     return out + '</div>';
   }
@@ -483,18 +533,26 @@
     const g = G();
     if (kind === 'mine') {
       const ti = g.turn;
-      const ids = CARD_ORDER.filter(cardEnabled);
-      const self = ids.filter((id) => CARDS[id].kind === 'self');
-      const attack = ids.filter((id) => CARDS[id].kind === 'attack');
-      return `<p class="eyebrow">كل بطاقة تُستخدم مرة واحدة في اللعبة · الوقت متوقف</p><h2 class="title" id="sheetTitle">بطاقات فريق ${teamName(ti)}</h2>
-        <ul class="rows">${self.map((id) => cardRow(ti, id)).join('')}</ul>
-        ${attack.length ? `<h3>بطاقات تستخدمونها في دور المنافسين</h3><ul class="rows">${attack.map((id) => cardRow(ti, id)).join('')}</ul>` : ''}`;
+      const frozen = Q() && Q().frozenBy != null;
+      return `<p class="eyebrow">كل بطاقة تُستخدم مرة واحدة في اللعبة · الوقت متوقف</p><h2 class="title" id="sheetTitle">بطاقات المساعدة لفريق ${teamName(ti)}</h2>
+        ${frozen ? `<p class="lead">فريق <b>${teamName(Q().frozenBy)}</b> جمّد بطاقاتكم في هذا السؤال.</p>` : ''}
+        <ul class="rows">${HELP.filter(cardEnabled).map((id) => cardRow(ti, id)).join('')}</ul>
+        ${SABOTAGE.some(cardEnabled) ? '<p class="note">بطاقات التخريب الخاصة بكم تستخدمونها من زر «تخريب» أثناء دور فريق آخر.</p>' : ''}`;
     }
     if (kind === 'theirs') {
       const others = g.teams.map((_, i) => i).filter((i) => i !== g.turn);
-      const ids = ['lie', 'rush', 'steal'].filter(cardEnabled);
-      return `<p class="eyebrow">ضد فريق ${teamName(g.turn)} · الوقت متوقف</p><h2 class="title" id="sheetTitle">بطاقات المنافسين</h2>
-        ${others.map((i) => `<p class="sheet-team">فريق <b>${teamName(i)}</b></p><ul class="rows">${ids.map((id) => cardRow(i, id)).join('')}</ul>`).join('')}`;
+      const ids = SABOTAGE.filter(cardEnabled);
+      const teamBlock = (i) => `<p class="sheet-team">فريق <b>${teamName(i)}</b> يخرّب بـ</p>
+        <div class="opts opts-3 opts-tight sabo">${ids.map((id) => {
+          const chk = canUse(i, id);
+          const used = g.teams[i].used.includes(id);
+          return `<button type="button" class="pill pill-sm ${used ? 'is-used' : ''}" data-act="use" data-id="${id}" data-team="${i}" ${chk.ok ? '' : 'disabled'} title="${esc(chk.ok ? CARDS[id].desc : chk.why)}"><span class="pill-ic">${ICON[id]}</span><span>${CARDS[id].name}${chk.ok ? '' : `<small>${chk.why}</small>`}</span></button>`;
+        }).join('')}</div>`;
+      return `<p class="eyebrow">ضد فريق ${teamName(g.turn)} · الوقت متوقف</p><h2 class="title" id="sheetTitle">التخريب</h2>
+        <p class="lead">الفريق الذي يريد التخريب يضغط على بطاقته. لكل نوع بطاقة واحدة فقط في السؤال.</p>
+        ${others.map(teamBlock).join('')}
+        <h3>ماذا تفعل كل بطاقة؟</h3>
+        <ul class="legend">${ids.map((id) => `<li><b>${CARDS[id].name}:</b> ${CARDS[id].desc}</li>`).join('')}</ul>`;
     }
     if (kind === 'scores') {
       const sub = S.screen === 'setup' ? '' : `الجولة ${ar(g.round)} من ${ar(S.settings.rounds)}`;
@@ -511,13 +569,17 @@
         'في كل جولة يجيب كل فريق عن سؤال واحد بالدور.',
         'الفريق صاحب الدور يختار الفئة والصعوبة: <b>سهل ١٠٠</b>، <b>متوسط ٢٠٠</b>، <b>صعب ٣٠٠</b> نقطة.',
         'اختاروا إجابة ثم اضغطوا الزر البرتقالي لتأكيدها قبل انتهاء الوقت.',
+        'أثناء السؤال تستطيع الفرق الأخرى التخريب من زر «تخريب».',
         'لا تُخصم نقاط عند الخطأ، لكن قد يسرق فريق آخر السؤال.',
         'الفريق صاحب أعلى نقاط بعد آخر جولة هو الفائز.'
       ];
+      const rows = (ids) => ids.map((id) => `<li class="row"><span class="row-ic">${ICON[id]}</span><span class="row-txt"><b>${CARDS[id].name}</b><span>${CARDS[id].desc}</span></span></li>`).join('');
       return `<p class="eyebrow">دليل سريع</p><h2 class="title" id="sheetTitle">طريقة اللعب</h2>
         <ol class="rules">${rules.map((r, i) => `<li><span>${ar(i + 1)}</span><span>${r}</span></li>`).join('')}</ol>
-        <h3>البطاقات</h3>
-        <ul class="rows">${CARD_ORDER.map((id) => `<li class="row"><span class="row-ic">${ICON[id]}</span><span class="row-txt"><b>${CARDS[id].name}</b><span>${CARDS[id].desc}</span></span><span class="row-state">${CARDS[id].kind === 'self' ? 'في دوركم' : 'ضد المنافس'}</span></li>`).join('')}</ul>`;
+        <h3>بطاقات المساعدة · في دوركم</h3>
+        <ul class="rows">${rows(HELP)}</ul>
+        <h3>بطاقات التخريب · ضد الفريق الذي يجيب</h3>
+        <ul class="rows">${rows(SABOTAGE)}</ul>`;
     }
     return '';
   }
@@ -656,14 +718,41 @@
     if (!timing()) return;
     const q = Q();
     const before = Math.ceil(q.timeLeft);
-    q.timeLeft = Math.max(0, q.timeLeft - dt);
+    /* round to the millisecond so repeated 0.2s steps land exactly on whole seconds */
+    q.timeLeft = Math.max(0, Math.round((q.timeLeft - dt) * 1000) / 1000);
     const after = Math.ceil(q.timeLeft);
     if (after !== before) {
       if (after > 0 && after <= 5) sfx('tick');
       save();
     }
     updateTimer();
+    if (q.phase === 'answer') {
+      if (q.fogBy != null && q.fogLeft > 0) {
+        q.fogLeft = Math.max(0, Math.round((q.fogLeft - dt) * 1000) / 1000);
+        const box = document.getElementById('answers');
+        if (box) {
+          const px = fogPx(q);
+          box.style.setProperty('--fog', `${px.toFixed(2)}px`);
+          box.classList.toggle('is-fog', px > 0);
+        }
+      }
+      if (q.scrambleBy != null && !q.scrambleOff && q.timeLeft > 0) {
+        q.scrambleT += dt;
+        if (q.scrambleT >= SCRAMBLE_EVERY) {
+          q.scrambleT = 0;
+          reshuffle(q);
+          render();
+        }
+      }
+    }
     if (q.timeLeft <= 0) timeUp();
+  }
+  function reshuffle(q) {
+    const cur = displayOrder(q);
+    let next = cur.slice();
+    for (let n = 0; n < 6 && next.join() === cur.join(); n++) next = shuffle(cur.slice());
+    q.order = next;
+    ui.shuffled = true;
   }
   function timeUp() {
     const q = Q();
@@ -772,6 +861,7 @@
 
   function nextTurn() {
     const g = G();
+    hideToast();
     g.done += 1;
     g.q = null;
     g.pick = { cat: null, diff: null };
@@ -823,15 +913,21 @@
         const idx = pickIndex(q.cat, q.d);
         if (idx == null) break;
         markUsed(q.cat, idx);
-        const keep = { double: q.double, life: q.life, lifeUsed: q.lifeUsed, shield: q.shield, rushBy: q.rushBy };
+        /* help effects carry over; rush, scramble and fog stay with the old question */
+        const keep = { double: q.double, life: q.life, lifeUsed: q.lifeUsed, shield: q.shield };
         g.q = Object.assign(buildQ(q.cat, q.d, idx), keep);
         toast('سؤال جديد، والوقت من البداية');
         break;
       }
-      case 'shield':
+      case 'shield': {
         q.shield = true;
-        toast(q.lie != null ? `الدرع أبطل كذبة فريق ${teamName(q.lie)}` : 'الدرع يحميكم من بطاقات المنافسين');
+        const undone = [];
+        if (q.lie != null) undone.push('الكذبة');
+        if (q.scrambleBy != null) { q.scrambleOff = true; undone.push('الخلط'); }
+        if (q.fogBy != null) { q.fogLeft = 0; q.fogOff = true; undone.push('الضباب'); }
+        toast(undone.length ? `الدرع أبطل ${undone.join(' و')}` : 'الدرع يمنع التخريب عنكم في هذا السؤال');
         break;
+      }
       case 'lie':
         q.lie = ti;
         q.phase = 'lie';
@@ -840,6 +936,21 @@
         q.rushBy = ti;
         q.timeLeft = Math.max(3, Math.ceil(q.timeLeft / 2));
         toast(`فريق ${teamName(ti)} استعجلكم: نصف الوقت فقط`);
+        break;
+      case 'freeze':
+        q.frozenBy = ti;
+        toast(`فريق ${teamName(ti)} جمّد بطاقات المساعدة`);
+        break;
+      case 'scramble':
+        q.scrambleBy = ti;
+        q.scrambleT = 0;
+        reshuffle(q);
+        toast(`فريق ${teamName(ti)} خلط الإجابات`);
+        break;
+      case 'fog':
+        q.fogBy = ti;
+        q.fogLeft = FOG_SECONDS;
+        toast(`فريق ${teamName(ti)} أطلق الضباب`);
         break;
       default: break;
     }
@@ -880,6 +991,7 @@
   }
 
   function newGame() {
+    hideToast();
     S.game = null;
     S.screen = 'setup';
     S.step = 0;
@@ -901,17 +1013,16 @@
         const i = st.cats.indexOf(id);
         if (i >= 0) st.cats.splice(i, 1); else st.cats.push(id);
         st.cats.sort((a, b) => CATS.findIndex((c) => c.id === a) - CATS.findIndex((c) => c.id === b));
+        fixRounds();
         sfx('tap'); render(); break;
       }
       case 'all-cats':
         st.cats = st.cats.length === CATS.length ? [] : CATS.map((c) => c.id);
+        fixRounds();
         sfx('tap'); render(); break;
       case 'teams':
         st.teams = Number(id);
-        if (st.rounds * st.teams > poolSize()) {
-          const ok = ROUND_OPTIONS.filter((n) => n * st.teams <= poolSize());
-          st.rounds = ok.length ? ok[ok.length - 1] : ROUND_OPTIONS[0];
-        }
+        fixRounds();
         sfx('tap'); render(); break;
       case 'time': st.time = Number(id); sfx('tap'); render(); break;
       case 'rounds': st.rounds = Number(id); sfx('tap'); render(); break;
@@ -984,7 +1095,8 @@
     if (tag === 'INPUT') return;
     const map = { '1': 0, '2': 1, '3': 2, '4': 3, '١': 0, '٢': 1, '٣': 2, '٤': 3 };
     if (S.screen === 'question' && map[e.key] != null) {
-      const btn = el.view.querySelector(`[data-act="opt"][data-id="${map[e.key]}"]`);
+      const i = displayOrder(Q())[map[e.key]];
+      const btn = el.view.querySelector(`[data-act="opt"][data-id="${i}"]`);
       if (btn && !btn.disabled) btn.click();
     }
   }
