@@ -3,7 +3,8 @@
   "private": true,
   "description": "مسابقة عودة ازدهار — Arabic family team quiz",
   "scripts": {
-    "test": "node --test --test-concurrency=1 \"tests/*.test.js\""
+    "test": "node --test --test-concurrency=1 \"tests/*.test.js\"",
+    "pdf": "node tools/questions-pdf.js"
   },
   "devDependencies": {
     "playwright": "1.63.0"

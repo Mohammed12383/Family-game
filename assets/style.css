@@ -120,7 +120,7 @@ button:disabled { cursor: default; }
 }
 .logo {
   display: inline-flex;
-  align-items: flex-start;
+  align-items: baseline;
   gap: 6px;
   font-size: 23px;
   line-height: 1;
@@ -130,7 +130,6 @@ button:disabled { cursor: default; }
 }
 .logo-a { font-weight: 300; }
 .logo-b { font-weight: 600; }
-.logo-mark { width: 24px; height: 16px; margin-top: -5px; color: var(--orange); flex: none; }
 .toplink {
   justify-self: end;
   font-size: 13px;
@@ -612,7 +611,6 @@ button:disabled { cursor: default; }
   .card { min-height: calc(100vh - 24px); min-height: calc(100dvh - 24px); }
   .top { padding: 22px 22px 0; }
   .logo { font-size: 18px; gap: 4px; }
-  .logo-mark { width: 20px; height: 14px; margin-top: -4px; }
   .scores { padding-top: 12px; gap: 4px 16px; }
   .view { padding: 20px 18px 6px; }
   .eyebrow { font-size: 14px; }

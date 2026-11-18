@@ -579,7 +579,8 @@
         <h3>بطاقات المساعدة · في دوركم</h3>
         <ul class="rows">${rows(HELP)}</ul>
         <h3>بطاقات التخريب · ضد الفريق الذي يجيب</h3>
-        <ul class="rows">${rows(SABOTAGE)}</ul>`;
+        <ul class="rows">${rows(SABOTAGE)}</ul>
+        ${window.LAMMA_NO_PDF ? '' : '<p class="note"><a class="linkbtn" href="questions.pdf" target="_blank" rel="noopener">تحميل كل الأسئلة مع الإجابات (PDF)</a></p>'}`;
     }
     return '';
   }

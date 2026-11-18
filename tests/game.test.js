@@ -435,6 +435,18 @@ test('messages from one turn do not carry over to the next team', async () => {
   await context.close();
 });
 
+test('how-to-play links to the questions PDF, and the PDF is there', async () => {
+  const { page, context, errors } = await open();
+  await page.click('.toplink');
+  const href = await page.getAttribute('#sheet a[href$=".pdf"]', 'href');
+  assert.equal(href, 'questions.pdf');
+  const res = await page.request.get(new URL(href, base).href);
+  assert.equal(res.status(), 200);
+  assert.equal((await res.body()).subarray(0, 4).toString(), '%PDF');
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
 /* ---------- timer ---------- */
 test('timer: running out of time counts as a miss', async () => {
   const { page, context, errors } = await open();
