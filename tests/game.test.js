@@ -28,7 +28,7 @@ before(async () => {
     fs.createReadStream(file).pipe(res);
   });
   await new Promise((r) => server.listen(0, r));
-  base = `http://localhost:${server.address().port}/index.html`;
+  base = process.env.GAME_URL || `http://localhost:${server.address().port}/index.html`;
   browser = await chromium.launch();
 });
 
@@ -435,7 +435,7 @@ test('messages from one turn do not carry over to the next team', async () => {
   await context.close();
 });
 
-test('how-to-play links to the questions PDF, and the PDF is there', async () => {
+test('how-to-play links to the questions PDF, and the PDF is there', { skip: !!process.env.GAME_URL && 'the preview page has no download link' }, async () => {
   const { page, context, errors } = await open();
   await page.click('.toplink');
   const href = await page.getAttribute('#sheet a[href$=".pdf"]', 'href');
@@ -503,6 +503,43 @@ test('team names are shown as plain text, never as page code', async () => {
   await setup(page, { names: ['<b>x</b>', 'فريق "٢"'] });
   assert.equal(await page.locator('#scores b').count(), 0);
   assert.match(await page.textContent('#scores'), /<b>x<\/b>/);
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('a game saved before the questions changed starts fresh instead of showing an old question', async () => {
+  const { page, context, errors } = await open();
+  await setup(page);
+  await openQuestion(page);
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem('lamma-family-v1'));
+    s.bank = 'old-bank';
+    s.game.q.text = 'سؤال قديم محذوف';
+    localStorage.setItem('lamma-family-v1', JSON.stringify(s));
+  });
+  await page.reload();
+  const s = await state(page);
+  assert.equal(s.screen, 'setup');
+  assert.equal(s.game, null);
+  assert.deepEqual(s.settings.cats, ['general', 'geo', 'islamic'], 'chosen settings are kept');
+  assert.doesNotMatch(await page.textContent('#view'), /سؤال قديم/);
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('settings saved before the newer sabotage cards existed get them switched on', async () => {
+  const { page, context, errors } = await open();
+  await page.evaluate(() => {
+    localStorage.setItem('lamma-family-v1', JSON.stringify({
+      v: 1, screen: 'setup', step: 5, game: null, seen: {}, sound: true,
+      settings: { cats: ['general', 'geo', 'islamic'], teams: 2, names: ['أ', 'ب'], time: 30, rounds: 4,
+        cards: ['time', 'double', 'fifty', 'life', 'swap', 'shield', 'lie', 'rush', 'steal'] }
+    }));
+  });
+  await page.reload();
+  for (const id of ['freeze', 'scramble', 'fog']) {
+    assert.equal(await page.getAttribute(`[data-act="card-toggle"][data-id="${id}"]`, 'aria-pressed'), 'true', id);
+  }
   assert.deepEqual(errors, []);
   await context.close();
 });

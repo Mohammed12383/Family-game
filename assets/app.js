@@ -75,9 +75,21 @@
   let S = null;
   const ui = { sheet: null, menu: false, lastKey: '', cardHint: null, shuffled: false };
 
+  /* fingerprint of the question bank: a saved game from an older bank is dropped on load */
+  const BANK = (() => {
+    const txt = JSON.stringify(CATS.map((c) => [c.id, c.q]));
+    let h = 5381;
+    for (let i = 0; i < txt.length; i++) h = ((h * 33) ^ txt.charCodeAt(i)) >>> 0;
+    return `${CATS.length}.${txt.length}.${h.toString(36)}`;
+  })();
+  /* cards added after the first release; older saved settings get them switched on */
+  const CARDS_V2 = ['freeze', 'scramble', 'fog'];
+
   function freshState() {
     return {
       v: 1,
+      bank: BANK,
+      cardsV: 2,
       screen: 'setup',
       step: 0,
       settings: { cats: [], teams: 2, names: DEFAULT_NAMES.slice(), time: 30, rounds: 6, cards: CARD_ORDER.slice() },
@@ -94,6 +106,16 @@
     s.settings = Object.assign(freshState().settings, st.settings);
     s.settings.cats = (s.settings.cats || []).filter((id) => CAT[id]);
     s.settings.cards = (s.settings.cards || []).filter((id) => CARDS[id]);
+    if ((st.cardsV || 1) < 2) {
+      CARDS_V2.forEach((id) => { if (!s.settings.cards.includes(id)) s.settings.cards.push(id); });
+      s.settings.cards.sort((a, b) => CARD_ORDER.indexOf(a) - CARD_ORDER.indexOf(b));
+      s.cardsV = 2;
+    }
+    if (st.bank !== BANK) {
+      s.bank = BANK;
+      s.seen = {};
+      if (s.game) { s.game = null; s.screen = 'setup'; s.step = 0; }
+    }
     while (s.settings.names.length < DEFAULT_NAMES.length) s.settings.names.push(DEFAULT_NAMES[s.settings.names.length]);
     if (s.screen !== 'setup' && !s.game) { s.screen = 'setup'; s.step = 0; }
     if (s.screen === 'question' && !(s.game && s.game.q)) s.screen = 'turn';
