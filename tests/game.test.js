@@ -544,6 +544,54 @@ test('settings saved before the newer sabotage cards existed get them switched o
   await context.close();
 });
 
+test('big group: 10 teams of 3 play a full round, with the saboteur picked first', async () => {
+  const { page, context, errors } = await open();
+  await setup(page, { teams: 10, rounds: 3, cats: ['general', 'geo', 'islamic', 'gulf'] });
+  let s = await state(page);
+  assert.equal(s.game.teams.length, 10);
+  assert.equal(s.game.total, 30);
+  assert.deepEqual(s.game.teams.map((t) => t.name).slice(-2), ['القمم', 'العواصف'], 'default names for all 10 teams');
+  // team 1 answers; team 8 sabotages with rush through the team picker
+  let qq = await openQuestion(page, { diff: 1 });
+  await page.click('[data-act="sheet-theirs"]');
+  assert.equal(await page.locator('#sheet [data-act="use"]').count(), 0, 'no card list until a team is picked');
+  await page.click('[data-act="sabo-team"][data-id="7"]');
+  await page.click('[data-act="use"][data-id="rush"][data-team="7"]');
+  assert.equal((await q(page)).rushBy, 7);
+  await choose(page, wrongOf(qq));
+  assert.equal(await page.locator('[data-act="steal"]').count(), 9, 'all nine other teams can steal');
+  await page.click('[data-act="steal"][data-id="9"]');
+  await choose(page, qq.correct);
+  assert.equal((await state(page)).game.teams[9].score, 100);
+  await page.click('#go');
+  for (let turn = 1; turn < 10; turn++) {
+    qq = await openQuestion(page, { diff: 1 + (turn % 3) });
+    await choose(page, qq.correct);
+    await page.click('#go');
+  }
+  s = await state(page);
+  assert.equal(s.screen, 'round');
+  assert.equal(await page.locator('.board-row').count(), 10);
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('setup: round choices show the total questions and an estimated play time', async () => {
+  const { page, context, errors } = await open();
+  for (const c of ['general', 'geo', 'islamic', 'gulf']) await page.click(`[data-act="cat"][data-id="${c}"]`);
+  await page.click('#go');
+  await page.click('[data-act="teams"][data-id="10"]');
+  for (let i = 0; i < 3; i++) await page.click('#go');
+  await page.click('[data-act="rounds"][data-id="4"]');
+  const note = await page.textContent('.note');
+  assert.match(note, /٤٠ سؤالاً/);
+  assert.match(note, /٤٠ دقيقة تقريباً/, '40 questions x (30s + 30s) = 40 minutes');
+  assert.equal(await page.isDisabled('[data-act="rounds"][data-id="6"]'), false, '60 questions fit in 4 categories');
+  assert.equal(await page.isDisabled('[data-act="rounds"][data-id="8"]'), true, '80 questions do not');
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
 /* ---------- layout ---------- */
 for (const width of [320, 390, 1440]) {
   test(`layout at ${width}px: no sideways scrolling and nothing overlaps`, async () => {
@@ -563,11 +611,12 @@ for (const width of [320, 390, 1440]) {
       r.overlaps.forEach((o) => problems.push(`${label}: ${o} overlap`));
     };
     await check('categories');
-    await setup(page, { teams: 5, rounds: 4, names: ['فريق الصقور الذهبية', 'الفهود', 'النجوم', 'الشهب', 'الموج'], cats: ['general', 'geo', 'islamic', 'arabic', 'gulf'] });
+    await setup(page, { teams: 10, rounds: 4, names: ['فريق الصقور الذهبية', 'الفهود', 'النجوم', 'الشهب', 'الموج'], cats: ['general', 'geo', 'islamic', 'arabic', 'gulf'] });
     await check('choose category');
     const qq = await openQuestion(page, { cat: 'arabic', diff: 3 });
     await check('question');
     await page.click('[data-act="sheet-theirs"]');
+    await page.click('[data-act="sabo-team"][data-id="9"]');
     await check('sabotage list');
     await page.click('#sheet [data-act="close"]');
     await choose(page, wrongOf(qq));

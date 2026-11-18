@@ -152,6 +152,7 @@ button:disabled { cursor: default; }
 .score-pts { color: var(--ink-2); font-weight: 500; }
 .score.is-turn { color: var(--ink); font-weight: 500; }
 .score.is-turn .score-pts { color: var(--ink); }
+.scores.is-many { gap: 4px 16px; font-size: 12px; max-width: 760px; margin-inline: auto; }
 .score.is-turn::before {
   content: "";
   width: 6px;
@@ -366,6 +367,8 @@ button:disabled { cursor: default; }
   text-align: start;
 }
 .board-row.is-lead { background: var(--ink); color: var(--paper-hi); }
+.board.is-many { gap: 8px; }
+.board.is-many .board-row { min-height: 42px; padding-block: 5px; font-size: 14px; }
 .board-n { font-size: 13px; opacity: 0.6; }
 .board-name { min-width: 0; overflow-wrap: anywhere; }
 .board-pts { font-weight: 500; white-space: nowrap; }

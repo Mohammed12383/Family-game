@@ -11,10 +11,12 @@
 
   const POINTS = { 1: 100, 2: 200, 3: 300 };
   const DIFFS = [{ d: 1, name: 'سهل' }, { d: 2, name: 'متوسط' }, { d: 3, name: 'صعب' }];
-  const TEAM_OPTIONS = [{ n: 2, label: 'فريقان' }, { n: 3, label: 'ثلاثة فرق' }, { n: 4, label: 'أربعة فرق' }, { n: 5, label: 'خمسة فرق' }];
+  const MAX_TEAMS = 10;
+  const TEAM_OPTIONS = Array.from({ length: MAX_TEAMS - 1 }, (_, i) => i + 2)
+    .map((n) => ({ n, label: n === 2 ? 'فريقان' : `${ar(n)} فرق` }));
   const TIME_OPTIONS = [15, 30, 45, 60];
-  const ROUND_OPTIONS = [4, 6, 8, 10];
-  const DEFAULT_NAMES = ['الصقور', 'الفهود', 'النجوم', 'الشهب', 'الموج'];
+  const ROUND_OPTIONS = [2, 3, 4, 6, 8, 10];
+  const DEFAULT_NAMES = ['الصقور', 'الفهود', 'النجوم', 'الشهب', 'الموج', 'البرق', 'النخيل', 'الرعد', 'القمم', 'العواصف'];
   const MIN_CATS = 3;
   const EXTRA_TIME = 15;
   const STEAL_MIN_TIME = 10;
@@ -73,7 +75,7 @@
 
   /* ================= state ================= */
   let S = null;
-  const ui = { sheet: null, menu: false, lastKey: '', cardHint: null, shuffled: false };
+  const ui = { sheet: null, menu: false, lastKey: '', cardHint: null, shuffled: false, saboTeam: null };
 
   /* fingerprint of the question bank: a saved game from an older bank is dropped on load */
   const BANK = (() => {
@@ -148,7 +150,13 @@
     if (n <= 10) return `${ar(n)} أسئلة`;
     return `${ar(n)} سؤالاً`;
   }
-  function roundsWord(n) { return n <= 10 ? `${ar(n)} جولات` : `${ar(n)} جولة`; }
+  function roundsWord(n) { return n === 2 ? 'جولتان' : n <= 10 ? `${ar(n)} جولات` : `${ar(n)} جولة`; }
+  /* rough play time: the answer time plus about half a minute to pick, reveal and move on */
+  function minutesWord(n) {
+    if (n <= 2) return 'دقيقتين تقريباً';
+    return n <= 10 ? `${ar(n)} دقائق تقريباً` : `${ar(n)} دقيقة تقريباً`;
+  }
+  const playMinutes = (st) => Math.max(1, Math.round((st.rounds * st.teams * (st.time + 30)) / 60 / 5) * 5);
   function poolSize() { return S.settings.cats.reduce((sum, id) => sum + (CAT[id] ? CAT[id].q.length : 0), 0); }
   /* keep the chosen number of rounds playable when categories or team count change */
   function fixRounds() {
@@ -345,19 +353,19 @@
           : `اخترتم <b>${catsWord(st.cats.length)}</b> فيها ${questionsWord(poolSize())}`}
           &nbsp;·&nbsp; <button type="button" class="linkbtn" data-act="all-cats">${all ? 'إلغاء الكل' : 'اختيار الكل'}</button></p>`;
     } else if (step.key === 'teams') {
-      body = `<div class="opts">${TEAM_OPTIONS.map((o) => pill({ act: 'teams', id: o.n, label: o.label, pressed: st.teams === o.n })).join('')}</div>
-        <p class="note">تجلس الفرق أمام شاشة واحدة، ويجيب كل فريق في دوره.</p>`;
+      body = `<div class="opts opts-3">${TEAM_OPTIONS.map((o) => pill({ act: 'teams', id: o.n, label: o.label, pressed: st.teams === o.n })).join('')}</div>
+        <p class="note">الأفضل ٢ إلى ٤ أشخاص في الفريق. مثلاً ٣٠ شخصاً = ١٠ فرق من ٣ أشخاص.</p>`;
     } else if (step.key === 'names') {
       const fields = st.names.slice(0, st.teams).map((nm, i) =>
         `<label class="field"><span class="sr">اسم الفريق ${ar(i + 1)}</span><input class="pill-input" id="team-name-${i}" data-name="${i}" value="${esc(nm)}" maxlength="18" placeholder="الفريق ${ar(i + 1)}" autocomplete="off" enterkeyhint="next"></label>`).join('');
-      body = `<div class="opts">${fields}</div><p class="note">اكتبوا ما تشاؤون، أو اتركوا الأسماء كما هي.</p>`;
+      body = `<div class="opts${st.teams > 4 ? ' short' : ''}">${fields}</div><p class="note">اكتبوا ما تشاؤون، أو اتركوا الأسماء كما هي.</p>`;
     } else if (step.key === 'time') {
       body = `<div class="opts">${TIME_OPTIONS.map((n) => pill({ act: 'time', id: n, label: `${ar(n)} ثانية`, pressed: st.time === n })).join('')}</div>
         <p class="note">يُحسب الوقت من لحظة ظهور السؤال، ويمكن زيادته ببطاقة الوقت الإضافي.</p>`;
     } else if (step.key === 'rounds') {
       const pool = poolSize();
-      body = `<div class="opts">${ROUND_OPTIONS.map((n) => pill({ act: 'rounds', id: n, label: roundsWord(n), pressed: st.rounds === n, disabled: n * st.teams > pool })).join('')}</div>
-        <p class="note">في كل جولة يجيب كل فريق عن سؤال واحد · المجموع <b>${questionsWord(st.rounds * st.teams)}</b></p>`;
+      body = `<div class="opts opts-3">${ROUND_OPTIONS.map((n) => pill({ act: 'rounds', id: n, label: roundsWord(n), pressed: st.rounds === n, disabled: n * st.teams > pool })).join('')}</div>
+        <p class="note">في كل جولة يجيب كل فريق عن سؤال واحد · المجموع <b>${questionsWord(st.rounds * st.teams)}</b> · مدة اللعب <b>${minutesWord(playMinutes(st))}</b></p>`;
     } else if (step.key === 'cards') {
       const hint = ui.cardHint && CARDS[ui.cardHint]
         ? `<b>${CARDS[ui.cardHint].name}:</b> ${CARDS[ui.cardHint].desc}`
@@ -510,7 +518,7 @@
   function boardHtml() {
     const st = standings();
     const top = st[0].score;
-    return `<ol class="board">${st.map((t, n) => `<li class="board-row ${t.score === top && top > 0 ? 'is-lead' : ''}">
+    return `<ol class="board${st.length > 5 ? ' is-many' : ''}">${st.map((t, n) => `<li class="board-row ${t.score === top && top > 0 ? 'is-lead' : ''}">
       <span class="board-n">${ar(n + 1)}</span><span class="board-name">${esc(t.name)}</span><span class="board-pts">${ar(t.score)} <small>نقطة</small></span></li>`).join('')}</ol>`;
   }
   function leaderLine() {
@@ -570,9 +578,15 @@
           const used = g.teams[i].used.includes(id);
           return `<button type="button" class="pill pill-sm ${used ? 'is-used' : ''}" data-act="use" data-id="${id}" data-team="${i}" ${chk.ok ? '' : 'disabled'} title="${esc(chk.ok ? CARDS[id].desc : chk.why)}"><span class="pill-ic">${ICON[id]}</span><span>${CARDS[id].name}${chk.ok ? '' : `<small>${chk.why}</small>`}</span></button>`;
         }).join('')}</div>`;
+      /* with many teams, pick the saboteur first so the list stays short */
+      const pickFirst = others.length >= 3;
+      const canSabotage = (i) => ids.some((id) => canUse(i, id).ok);
+      const chooser = `<p class="sheet-team">من الفريق الذي يخرّب؟</p>
+        <div class="opts opts-3 opts-tight sabo">${others.map((i) => pill({ act: 'sabo-team', id: i, label: teamName(i), pressed: ui.saboTeam === i, cls: 'pill-sm', disabled: !canSabotage(i) })).join('')}</div>
+        ${ui.saboTeam != null && others.includes(ui.saboTeam) ? teamBlock(ui.saboTeam) : ''}`;
       return `<p class="eyebrow">ضد فريق ${teamName(g.turn)} · الوقت متوقف</p><h2 class="title" id="sheetTitle">التخريب</h2>
-        <p class="lead">الفريق الذي يريد التخريب يضغط على بطاقته. لكل نوع بطاقة واحدة فقط في السؤال.</p>
-        ${others.map(teamBlock).join('')}
+        <p class="lead">${pickFirst ? 'اختاروا الفريق الذي يخرّب، ثم بطاقته.' : 'الفريق الذي يريد التخريب يضغط على بطاقته.'} لكل نوع بطاقة واحدة فقط في السؤال.</p>
+        ${pickFirst ? chooser : others.map(teamBlock).join('')}
         <h3>ماذا تفعل كل بطاقة؟</h3>
         <ul class="legend">${ids.map((id) => `<li><b>${CARDS[id].name}:</b> ${CARDS[id].desc}</li>`).join('')}</ul>`;
     }
@@ -648,6 +662,7 @@
     el.scores.hidden = !inGame;
     if (inGame) {
       const active = activeTeam();
+      el.scores.classList.toggle('is-many', g.teams.length > 5);
       el.scores.innerHTML = g.teams.map((t, i) => `<span class="score ${i === active && S.screen !== 'final' && S.screen !== 'round' ? 'is-turn' : ''}"><span>${esc(t.name)}</span><span class="score-pts">${ar(t.score)}</span></span>`).join('');
     }
 
@@ -1073,7 +1088,8 @@
         sfx('tap'); render(); break;
       }
       case 'sheet-mine': ui.sheet = 'mine'; sfx('tap'); render(); break;
-      case 'sheet-theirs': ui.sheet = 'theirs'; sfx('tap'); render(); break;
+      case 'sheet-theirs': ui.sheet = 'theirs'; ui.saboTeam = null; sfx('tap'); render(); break;
+      case 'sabo-team': ui.saboTeam = Number(id); sfx('tap'); renderSheet(); break;
       case 'use': useCard(Number(t.dataset.team), id); break;
       case 'steal': startSteal(Number(id)); break;
       case 'close': ui.sheet = null; lastTick = performance.now(); render(); break;
