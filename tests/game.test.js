@@ -119,6 +119,23 @@ test('question bank: every question has 4 different answers and a valid difficul
   }
 });
 
+test('question bank: the right answer never gives itself away by being longer than the wrong ones', () => {
+  const sandbox = {};
+  new Function('window', fs.readFileSync(path.join(ROOT, 'assets/questions.js'), 'utf8'))(sandbox);
+  const words = (s) => s.trim().split(/\s+/).length;
+  const giveaways = [];
+  for (const cat of sandbox.LAMMA_DATA) {
+    for (const [, text, right, ...wrong] of cat.q) {
+      const longest = Math.max(...wrong.map((s) => s.length));
+      const mostWords = Math.max(...wrong.map(words));
+      if ((right.length > longest * 1.4 && right.length - longest >= 5) || words(right) > mostWords + 1) {
+        giveaways.push(`${cat.name}: ${text} → ${right}`);
+      }
+    }
+  }
+  assert.deepEqual(giveaways, [], 'make the wrong answers as long and detailed as the right one');
+});
+
 /* ---------- setup ---------- */
 test('setup: you need at least three categories to continue', async () => {
   const { page, context, errors } = await open();
