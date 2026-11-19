@@ -70,4 +70,4 @@ npm test
 
 ---
 
-**English:** a single-screen Arabic family quiz for 2–10 teams. Plain HTML/CSS/JS with no build step: open `index.html`. Questions live in `assets/questions.js` (13 categories including math, 195 questions). `npm test` runs 36 tests covering scoring, every card, the timer, refresh-resume, saves from older versions and phone layouts.
+**English:** a single-screen Arabic family quiz for 2–10 teams. Plain HTML/CSS/JS with no build step: open `index.html`. Questions live in `assets/questions.js` (13 categories including math, 195 questions). `npm test` runs 37 tests covering scoring, every card, the timer, refresh-resume, saves from older versions and phone layouts.

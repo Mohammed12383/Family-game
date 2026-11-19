@@ -15,7 +15,8 @@
   const TEAM_OPTIONS = Array.from({ length: MAX_TEAMS - 1 }, (_, i) => i + 2)
     .map((n) => ({ n, label: n === 2 ? 'فريقان' : `${ar(n)} فرق` }));
   const TIME_OPTIONS = [15, 30, 45, 60];
-  const ROUND_OPTIONS = [2, 3, 4, 6, 8, 10];
+  /* quick picks on the rounds screen; the last pick is always "all questions" (the computed maximum) */
+  const QUICK_ROUNDS = [3, 6, 10, 20];
   const DEFAULT_NAMES = ['الصقور', 'الفهود', 'النجوم', 'الشهب', 'الموج', 'البرق', 'النخيل', 'الرعد', 'القمم', 'العواصف'];
   const MIN_CATS = 3;
   const EXTRA_TIME = 15;
@@ -151,20 +152,30 @@
     if (n <= 10) return `${ar(n)} أسئلة`;
     return `${ar(n)} سؤالاً`;
   }
-  function roundsWord(n) { return n === 2 ? 'جولتان' : n <= 10 ? `${ar(n)} جولات` : `${ar(n)} جولة`; }
+  function roundsWord(n) {
+    if (n === 1) return 'جولة واحدة';
+    if (n === 2) return 'جولتان';
+    return n <= 10 ? `${ar(n)} جولات` : `${ar(n)} جولة`;
+  }
+  const roundsUnit = (n) => (n >= 3 && n <= 10 ? 'جولات' : 'جولة');
+  const teamsWord = (n) => (n === 2 ? 'فريقين' : `${ar(n)} فرق`);
   /* rough play time: the answer time plus about half a minute to pick, reveal and move on */
-  function minutesWord(n) {
-    if (n <= 2) return 'دقيقتين تقريباً';
-    return n <= 10 ? `${ar(n)} دقائق تقريباً` : `${ar(n)} دقيقة تقريباً`;
+  function durationWord(min) {
+    const mins = (n) => (n <= 10 ? `${ar(n)} دقائق` : `${ar(n)} دقيقة`);
+    if (min < 60) return `${mins(min)} تقريباً`;
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    const hours = h === 1 ? 'ساعة' : h === 2 ? 'ساعتان' : h <= 10 ? `${ar(h)} ساعات` : `${ar(h)} ساعة`;
+    return `${hours}${m ? ` و${mins(m)}` : ''} تقريباً`;
   }
   const playMinutes = (st) => Math.max(1, Math.round((st.rounds * st.teams * (st.time + 30)) / 60 / 5) * 5);
   function poolSize() { return S.settings.cats.reduce((sum, id) => sum + (CAT[id] ? CAT[id].q.length : 0), 0); }
+  /* most rounds the chosen categories can fill: every team gets one new question per round */
+  function maxRounds() { return Math.max(1, Math.floor(poolSize() / S.settings.teams)); }
   /* keep the chosen number of rounds playable when categories or team count change */
   function fixRounds() {
     const st = S.settings;
-    if (st.rounds * st.teams <= poolSize()) return;
-    const ok = ROUND_OPTIONS.filter((n) => n * st.teams <= poolSize());
-    st.rounds = ok.length ? ok[ok.length - 1] : ROUND_OPTIONS[0];
+    st.rounds = Math.min(Math.max(1, st.rounds | 0), maxRounds());
   }
 
   const G = () => S.game;
@@ -372,9 +383,18 @@
       body = `<div class="opts">${TIME_OPTIONS.map((n) => pill({ act: 'time', id: n, label: `${ar(n)} ثانية`, pressed: st.time === n })).join('')}</div>
         <p class="note">يُحسب الوقت من لحظة ظهور السؤال، ويمكن زيادته ببطاقة الوقت الإضافي.</p>`;
     } else if (step.key === 'rounds') {
+      fixRounds();
       const pool = poolSize();
-      body = `<div class="opts opts-3">${ROUND_OPTIONS.map((n) => pill({ act: 'rounds', id: n, label: roundsWord(n), pressed: st.rounds === n, disabled: n * st.teams > pool })).join('')}</div>
-        <p class="note">في كل جولة يجيب كل فريق عن سؤال واحد · المجموع <b>${questionsWord(st.rounds * st.teams)}</b> · مدة اللعب <b>${minutesWord(playMinutes(st))}</b></p>`;
+      const max = maxRounds();
+      const quick = [...new Set(QUICK_ROUNDS.filter((n) => n < max).concat(max))];
+      body = `<div class="stepper" role="group" aria-label="عدد الجولات">
+          <button type="button" class="step-btn" id="rounds-dec" data-act="rounds-dec" aria-label="جولة أقل" ${st.rounds <= 1 ? 'disabled' : ''}>−</button>
+          <output class="step-val" aria-live="polite"><b>${ar(st.rounds)}</b><span>${roundsUnit(st.rounds)}</span></output>
+          <button type="button" class="step-btn" id="rounds-inc" data-act="rounds-inc" aria-label="جولة أكثر" ${st.rounds >= max ? 'disabled' : ''}>+</button>
+        </div>
+        <div class="opts opts-wide opts-tight quick">${quick.map((n) => pill({ act: 'rounds', id: n, cls: 'pill-sm', pressed: st.rounds === n,
+          label: n === max ? `كل الأسئلة · ${ar(n)}` : roundsWord(n) })).join('')}</div>
+        <p class="note">الحد الأقصى <b>${roundsWord(max)}</b> مع ${teamsWord(st.teams)} و${questionsWord(pool)} · المجموع <b>${questionsWord(st.rounds * st.teams)}</b> · مدة اللعب <b>${durationWord(playMinutes(st))}</b></p>`;
     } else if (step.key === 'cards') {
       const hint = ui.cardHint && CARDS[ui.cardHint]
         ? `<b>${CARDS[ui.cardHint].name}:</b> ${CARDS[ui.cardHint].desc}`
@@ -1072,7 +1092,9 @@
         fixRounds();
         sfx('tap'); render(); break;
       case 'time': st.time = Number(id); sfx('tap'); render(); break;
-      case 'rounds': st.rounds = Number(id); sfx('tap'); render(); break;
+      case 'rounds': st.rounds = Number(id); fixRounds(); sfx('tap'); render(); break;
+      case 'rounds-inc': st.rounds += 1; fixRounds(); sfx('tap'); render(); break;
+      case 'rounds-dec': st.rounds -= 1; fixRounds(); sfx('tap'); render(); break;
       case 'card-toggle': {
         const i = st.cards.indexOf(id);
         if (i >= 0) st.cards.splice(i, 1); else st.cards.push(id);

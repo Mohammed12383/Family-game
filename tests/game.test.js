@@ -57,6 +57,15 @@ const state = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('lam
 const q = async (page) => (await state(page)).game.q;
 const wrongOf = (qq) => [0, 1, 2, 3].find((i) => i !== qq.correct && !qq.removed.includes(i) && !qq.struck.includes(i));
 
+async function setRounds(page, n) {
+  for (let k = 0; k < 250; k++) {
+    const cur = (await state(page)).settings.rounds;
+    if (cur === n) return;
+    await page.click(cur < n ? '[data-act="rounds-inc"]' : '[data-act="rounds-dec"]');
+  }
+  throw new Error(`could not set rounds to ${n}`);
+}
+
 async function setup(page, { cats = ['general', 'geo', 'islamic'], teams = 2, names, time = 30, rounds = 4, cards = ALL_CARDS } = {}) {
   for (const c of cats) await page.click(`[data-act="cat"][data-id="${c}"]`);
   await page.click('#go');
@@ -66,7 +75,7 @@ async function setup(page, { cats = ['general', 'geo', 'islamic'], teams = 2, na
   await page.click('#go');
   await page.click(`[data-act="time"][data-id="${time}"]`);
   await page.click('#go');
-  await page.click(`[data-act="rounds"][data-id="${rounds}"]`);
+  await setRounds(page, rounds);
   await page.click('#go');
   for (const id of ALL_CARDS) {
     const on = (await page.getAttribute(`[data-act="card-toggle"][data-id="${id}"]`, 'aria-pressed')) === 'true';
@@ -148,15 +157,21 @@ test('setup: you need at least three categories to continue', async () => {
   await context.close();
 });
 
-test('setup: round counts that need more questions than you picked are disabled', async () => {
+test('setup: the most rounds is the questions available divided by the teams', async () => {
   const { page, context, errors } = await open();
   for (const c of ['general', 'geo', 'islamic']) await page.click(`[data-act="cat"][data-id="${c}"]`); // 45 questions
   await page.click('#go');
   await page.click('[data-act="teams"][data-id="5"]');
   for (let i = 0; i < 3; i++) await page.click('#go');
-  assert.equal(await page.isDisabled('[data-act="rounds"][data-id="10"]'), true, '10 rounds x 5 teams = 50 > 45');
-  assert.equal(await page.isDisabled('[data-act="rounds"][data-id="8"]'), false, '8 rounds x 5 teams = 40');
-  assert.equal(await page.isDisabled('#go'), false, 'the chosen round count is adjusted to a playable one');
+  // 45 questions / 5 teams = 9 rounds at most
+  assert.equal(await page.textContent('[data-act="rounds"][data-id="9"]'), 'كل الأسئلة · ٩');
+  await page.click('[data-act="rounds"][data-id="9"]');
+  assert.equal((await state(page)).settings.rounds, 9);
+  assert.equal(await page.isDisabled('#rounds-inc'), true, 'cannot go past the maximum');
+  assert.equal(await page.isDisabled('#rounds-dec'), false);
+  await page.click('#rounds-dec');
+  assert.equal((await state(page)).settings.rounds, 8);
+  assert.equal(await page.isDisabled('#go'), false);
   assert.deepEqual(errors, []);
   await context.close();
 });
@@ -622,12 +637,33 @@ test('setup: round choices show the total questions and an estimated play time',
   await page.click('#go');
   await page.click('[data-act="teams"][data-id="10"]');
   for (let i = 0; i < 3; i++) await page.click('#go');
-  await page.click('[data-act="rounds"][data-id="4"]');
+  await setRounds(page, 4);
   const note = await page.textContent('.note');
   assert.match(note, /٤٠ سؤالاً/);
   assert.match(note, /٤٠ دقيقة تقريباً/, '40 questions x (30s + 30s) = 40 minutes');
-  assert.equal(await page.isDisabled('[data-act="rounds"][data-id="6"]'), false, '60 questions fit in 4 categories');
-  assert.equal(await page.isDisabled('[data-act="rounds"][data-id="8"]'), true, '80 questions do not');
+  assert.match(note, /الحد الأقصى ٦ جولات/, '60 questions / 10 teams = 6 rounds');
+  await setRounds(page, 6);
+  assert.equal(await page.isDisabled('#rounds-inc'), true);
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('two teams with every category can play up to all the questions (97 rounds)', async () => {
+  const { page, context, errors } = await open();
+  await page.click('[data-act="all-cats"]');
+  const pool = (await state(page)).settings.cats.length * 15;
+  await page.click('#go');
+  await page.click('[data-act="teams"][data-id="2"]');
+  for (let i = 0; i < 3; i++) await page.click('#go');
+  const max = Math.floor(pool / 2);
+  await page.click(`[data-act="rounds"][data-id="${max}"]`);
+  assert.match(await page.textContent('.note'), /ساعات/, 'long games show their length in hours');
+  await page.click('#go');
+  await page.click('#go');
+  const s = await state(page);
+  assert.equal(s.settings.rounds, max);
+  assert.equal(s.game.total, max * 2);
+  assert.match(await page.textContent('.eyebrow'), new RegExp(`من ${String(max).replace(/[0-9]/g, (d) => '٠١٢٣٤٥٦٧٨٩'[d])}`));
   assert.deepEqual(errors, []);
   await context.close();
 });
