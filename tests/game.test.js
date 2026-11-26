@@ -1,5 +1,5 @@
 /*
-  Automated tests for مسابقة عودة ازدهار.
+  Automated tests for مسابقة الزنبقات الجميلات.
   Run:  npm install && npx playwright install chromium && npm test
   Each test opens the real game in a headless browser, plays it through the UI,
   and checks the saved game state. Timers use a fake clock so they run instantly.
@@ -84,11 +84,23 @@ async function setup(page, { cats = ['general', 'geo', 'islamic'], teams = 2, na
   await page.click('#go');
 }
 
-async function openQuestion(page, { cat, diff = 1 } = {}) {
+/* picks a question; unless `prep` is set, it also skips the sabotage step (nobody sabotages) so the question shows */
+async function openQuestion(page, { cat, diff = 1, prep = false } = {}) {
   await page.click(cat ? `[data-act="pick-cat"][data-id="${cat}"]` : '[data-act="pick-cat"]:not([disabled])');
   await page.click(`[data-act="pick-diff"][data-id="${diff}"]`);
   await page.click('#go');
+  if (!prep && (await q(page)).phase === 'prep') await page.click('#go');
   return q(page);
+}
+const startQuestion = (page) => page.click('#go');
+
+/* waits on real time (the page clock is fake) for something the browser does on its own, like full screen */
+async function until(page, fn, arg) {
+  for (let i = 0; i < 100; i++) {
+    if (await page.evaluate(fn, arg)) return true;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return false;
 }
 
 async function choose(page, i) {
@@ -101,9 +113,11 @@ async function useHelp(page, id) {
   await page.click(`[data-act="use"][data-id="${id}"]`);
 }
 
+/* on the step before the question; with many teams the saboteur is picked first */
 async function useSabotage(page, team, id) {
-  await page.click('[data-act="sheet-theirs"]');
-  await page.click(`[data-act="use"][data-id="${id}"][data-team="${team}"]`);
+  const pick = page.locator(`[data-act="sabo-team"][data-id="${team}"]`);
+  if (await pick.count()) await pick.click();
+  await page.click(`#view [data-act="use"][data-id="${id}"][data-team="${team}"]`);
 }
 
 /* ---------- question bank ---------- */
@@ -295,36 +309,65 @@ test('help: change question gives a new question and a full timer', async () => 
 });
 
 /* ---------- sabotage cards ---------- */
-test('sabotage: the sabotage button is visible on every question', async () => {
+test('sabotage: chosen before the question appears, and the clock waits until the question starts', async () => {
   const { page, context, errors } = await open();
-  await setup(page);
-  await openQuestion(page);
-  const chip = page.locator('[data-act="sheet-theirs"]');
-  assert.equal(await chip.isVisible(), true);
-  assert.match(await chip.textContent(), /تخريب/);
-  await chip.click();
-  assert.equal(await page.locator('#sheet [data-act="use"][data-team="1"]:not([disabled])').count(), 5, 'bluff, rush, freeze, scramble, fog');
+  await setup(page, { time: 30 });
+  const qq = await openQuestion(page, { prep: true });
+  assert.equal(qq.phase, 'prep');
+  assert.notEqual(await page.textContent('.title'), qq.text, 'the question is still hidden');
+  assert.equal(await page.locator('#answers').count(), 0, 'no answers on show yet');
+  assert.equal(await page.locator('#view [data-act="use"][data-team="1"]:not([disabled])').count(), 5, 'bluff, rush, freeze, scramble, fog');
+  assert.equal(await page.locator('#view [data-act="use"][data-team="0"]').count(), 0, 'the answering team cannot sabotage itself');
+  await page.clock.runFor(20000);
+  assert.equal((await q(page)).timeLeft, 30, 'no time passes while the others decide');
+  await page.reload();
+  assert.equal((await q(page)).phase, 'prep', 'a refresh keeps the sabotage step');
+  await useSabotage(page, 1, 'freeze');
+  assert.match(await page.textContent('.tags'), /تجميد/);
+  await startQuestion(page);
+  assert.equal(await page.textContent('.title'), qq.text);
+  assert.equal(await page.locator('[data-act="use"][data-team]').count(), 0, 'no sabotage once the question is showing');
+  assert.equal(await page.locator('[data-act="sheet-theirs"]').count(), 0, 'no sabotage button on the question');
+  await page.clock.runFor(5000);
+  const t = (await q(page)).timeLeft; // the saved clock lags by up to a second
+  assert.ok(Math.abs(t - 25) <= 1, `the clock runs once the question shows, got ${t}`);
   assert.deepEqual(errors, []);
   await context.close();
 });
 
-test('sabotage: a successful bluff gives the bluffing team the points, and the clock stops while they peek', async () => {
+test('sabotage: the step is skipped when no other team has a sabotage card', async () => {
   const { page, context, errors } = await open();
-  await setup(page, { teams: 3 });
-  const qq = await openQuestion(page, { diff: 2 });
+  await setup(page, { cards: ['time', 'double', 'steal'] });
+  await page.click('[data-act="pick-cat"]:not([disabled])');
+  await page.click('[data-act="pick-diff"][data-id="1"]');
+  assert.equal(await page.textContent('#goLabel'), 'اعرض السؤال');
+  await page.click('#go');
+  const qq = await q(page);
+  assert.equal(qq.phase, 'answer', 'straight to the question');
+  assert.equal(await page.textContent('.title'), qq.text);
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('sabotage: a successful bluff gives the bluffing team the points; they see the question and answer before it appears', async () => {
+  const { page, context, errors } = await open();
+  await setup(page, { teams: 3, time: 30 });
+  const qq = await openQuestion(page, { diff: 2, prep: true });
   await useSabotage(page, 1, 'lie');
   assert.equal(await page.isVisible('#peek'), true);
-  const before = (await q(page)).timeLeft;
   await page.clock.runFor(6000);
-  assert.equal((await q(page)).timeLeft, before, 'timer paused during the bluff');
+  assert.equal((await q(page)).timeLeft, 30, 'the clock has not started during the bluff');
   const peek = await page.locator('#peek').boundingBox();
   await page.mouse.move(peek.x + peek.width / 2, peek.y + peek.height / 2);
   await page.mouse.down();
-  assert.equal((await page.textContent('#peek .peek-show')).trim(), qq.options[qq.correct]);
-  assert.equal(await page.isVisible('#peek .peek-show'), true, 'answer shows while held');
+  assert.equal((await page.textContent('#peek .peek-a')).trim(), qq.options[qq.correct]);
+  assert.equal((await page.textContent('#peek .peek-q')).trim(), qq.text);
+  assert.equal(await page.isVisible('#peek .peek-show'), true, 'question and answer show while held');
   await page.mouse.up();
-  assert.equal(await page.isVisible('#peek .peek-show'), false, 'answer hides on release');
+  assert.equal(await page.isVisible('#peek .peek-show'), false, 'they hide on release');
   await page.click('#go');
+  assert.equal((await q(page)).phase, 'prep', 'back to the sabotage step so others can still sabotage');
+  await startQuestion(page);
   await choose(page, wrongOf(qq));
   const s = await state(page);
   assert.deepEqual(s.game.teams.map((t) => t.score), [0, 200, 0]);
@@ -336,21 +379,26 @@ test('sabotage: a successful bluff gives the bluffing team the points, and the c
 test('sabotage: a failed bluff gives nothing to the bluffing team', async () => {
   const { page, context, errors } = await open();
   await setup(page);
-  const qq = await openQuestion(page, { diff: 1 });
+  const qq = await openQuestion(page, { diff: 1, prep: true });
   await useSabotage(page, 1, 'lie');
   await page.click('#go');
+  await startQuestion(page);
   await choose(page, qq.correct);
   assert.deepEqual((await state(page)).game.teams.map((t) => t.score), [100, 0]);
   assert.deepEqual(errors, []);
   await context.close();
 });
 
-test('sabotage: rush halves the remaining time', async () => {
+test('sabotage: rush makes the team start with half the time', async () => {
   const { page, context, errors } = await open();
   await setup(page, { time: 30 });
-  await openQuestion(page);
+  await openQuestion(page, { prep: true });
   await useSabotage(page, 1, 'rush');
   assert.equal((await q(page)).timeLeft, 15);
+  await startQuestion(page);
+  await page.clock.runFor(3000);
+  const t = (await q(page)).timeLeft; // the saved clock lags by up to a second
+  assert.ok(Math.abs(t - 12) <= 1, `expected about 12s, got ${t}`);
   assert.deepEqual(errors, []);
   await context.close();
 });
@@ -358,8 +406,9 @@ test('sabotage: rush halves the remaining time', async () => {
 test('sabotage: freeze stops the answering team from using help cards', async () => {
   const { page, context, errors } = await open();
   await setup(page);
-  await openQuestion(page);
+  await openQuestion(page, { prep: true });
   await useSabotage(page, 1, 'freeze');
+  await startQuestion(page);
   await page.click('[data-act="sheet-mine"]');
   assert.equal(await page.locator('#sheet [data-act="use"]').count(), 0);
   assert.match(await page.textContent('#sheet'), /جمّد/);
@@ -370,8 +419,9 @@ test('sabotage: freeze stops the answering team from using help cards', async ()
 test('sabotage: scramble moves the answers around every 3 seconds', async () => {
   const { page, context, errors } = await open();
   await setup(page);
-  await openQuestion(page);
+  await openQuestion(page, { prep: true });
   await useSabotage(page, 1, 'scramble');
+  await startQuestion(page);
   const order = () => page.$$eval('#answers [data-act="opt"]', (els) => els.map((e) => e.dataset.id).join());
   const first = await order();
   await page.clock.runFor(3200);
@@ -384,11 +434,13 @@ test('sabotage: scramble moves the answers around every 3 seconds', async () => 
   await context.close();
 });
 
-test('sabotage: fog blurs the answers and clears after 10 seconds', async () => {
+test('sabotage: fog blurs the answers once the question shows and clears after 10 seconds', async () => {
   const { page, context, errors } = await open();
   await setup(page, { time: 30 });
-  await openQuestion(page);
+  await openQuestion(page, { prep: true });
   await useSabotage(page, 1, 'fog');
+  await page.clock.runFor(8000); // waiting on the sabotage step must not use up the fog
+  await startQuestion(page);
   assert.equal(await page.getAttribute('#answers', 'class').then((c) => c.includes('is-fog')), true);
   const blur = await page.$eval('#answers .pill span', (e) => getComputedStyle(e).filter);
   assert.match(blur, /blur\((6|7)/);
@@ -412,21 +464,19 @@ test('sabotage: steal lets another team answer a missed question and take its po
   await context.close();
 });
 
-test('shield: blocks new sabotage and cancels bluff, scramble and fog already used', async () => {
+test('shield: cancels the bluff, scramble and fog used before the question, and stops a steal', async () => {
   const { page, context, errors } = await open();
   await setup(page, { teams: 3 });
-  const qq = await openQuestion(page, { diff: 1 });
+  const qq = await openQuestion(page, { diff: 1, prep: true });
   await useSabotage(page, 1, 'lie');
   await page.click('#go');
   await useSabotage(page, 2, 'fog');
   await useSabotage(page, 1, 'scramble');
+  await startQuestion(page);
   await useHelp(page, 'shield');
   const s1 = await q(page);
   assert.equal(s1.scrambleOff, true);
   assert.equal(s1.fogLeft, 0);
-  await page.click('[data-act="sheet-theirs"]');
-  assert.equal(await page.locator('#sheet [data-act="use"]:not([disabled])').count(), 0, 'no sabotage allowed');
-  await page.click('#sheet [data-act="close"]');
   await choose(page, wrongOf(qq));
   const s = await state(page);
   assert.deepEqual(s.game.teams.map((t) => t.score), [0, 0, 0], 'the cancelled bluff earns nothing');
@@ -457,9 +507,10 @@ test('each card can be used only once per game', async () => {
 test('messages from one turn do not carry over to the next team', async () => {
   const { page, context, errors } = await open();
   await setup(page);
-  const qq = await openQuestion(page);
+  const qq = await openQuestion(page, { prep: true });
   await useSabotage(page, 1, 'fog');
   assert.equal(await page.getAttribute('#toast', 'class').then((c) => c.includes('on')), true);
+  await startQuestion(page);
   await choose(page, qq.correct);
   await page.click('#go');
   assert.equal(await page.getAttribute('#toast', 'class').then((c) => c.includes('on')), false);
@@ -475,6 +526,72 @@ test('how-to-play links to the questions PDF, and the PDF is there', { skip: !!p
   const res = await page.request.get(new URL(href, base).href);
   assert.equal(res.status(), 200);
   assert.equal((await res.body()).subarray(0, 4).toString(), '%PDF');
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('full screen: the button at the top switches full screen on and off, and the menu has it too', async () => {
+  const { page, context, errors } = await open();
+  assert.equal(await page.isVisible('#fs'), true);
+  assert.equal(await page.getAttribute('#fs', 'aria-label'), 'ملء الشاشة');
+  const pressed = (v) => until(page, (on) => !!document.fullscreenElement === on && document.getElementById('fs').getAttribute('aria-pressed') === String(on), v);
+  await page.click('#fs');
+  assert.equal(await pressed(true), true, 'goes full screen and the button shows it');
+  assert.equal(await page.getAttribute('#fs', 'aria-label'), 'الخروج من ملء الشاشة');
+  await page.click('#fs');
+  assert.equal(await pressed(false), true, 'leaves full screen and the button shows it');
+  assert.equal(await page.getAttribute('#fs', 'aria-label'), 'ملء الشاشة');
+  await page.click('#burger');
+  await page.click('#menu [data-act="fullscreen"]');
+  assert.equal(await until(page, () => !!document.fullscreenElement), true, 'the menu item works too');
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('screen fit: a laptop window scales the game down, a TV scales it up, a phone keeps its own layout', async () => {
+  const sizes = [
+    { w: 1440, h: 765, ui: 0.82, why: 'a 2880x1800 laptop at 200% Windows scaling' },
+    { w: 1920, h: 1080, ui: 1.1, why: 'a TV in full screen' },
+    { w: 390, h: 844, ui: 1, why: 'a phone' }
+  ];
+  for (const s of sizes) {
+    const { page, context, errors } = await open({ viewport: { width: s.w, height: s.h } });
+    const ui = Number(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--ui')));
+    assert.equal(ui, s.ui, s.why);
+    const pillH = (await page.locator('[data-act="cat"]').first().boundingBox()).height;
+    const base = s.w <= 640 ? 46 : 50;
+    assert.ok(Math.abs(pillH - base * s.ui) < 2, `${s.why}: buttons are ${pillH}px tall`);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, `${s.why}: no sideways scrolling`);
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
+});
+
+test('display size: the menu − and + make the game smaller or bigger, and each device remembers it', async () => {
+  const { page, context, errors } = await open({ viewport: { width: 1440, height: 765 } });
+  const ui = async () => Number(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--ui')));
+  const pillH = async () => (await page.locator('[data-act="cat"]').first().boundingBox()).height;
+  assert.equal(await ui(), 0.82, 'starts at the automatic size');
+  const before = await pillH();
+  await page.click('#burger');
+  assert.match(await page.textContent('#size-val'), /١٠٠٪/);
+  await page.click('#size-down');
+  await page.click('#size-down');
+  assert.equal(await page.isVisible('#menu'), true, 'the menu stays open while adjusting');
+  assert.match(await page.textContent('#size-val'), /٨٠٪/);
+  assert.equal(await ui(), 0.66);
+  assert.ok((await pillH()) < before * 0.85, 'the buttons got smaller');
+  await page.reload();
+  assert.equal(await ui(), 0.66, 'the size is remembered after a refresh');
+  assert.equal((await state(page)).size, 0.8);
+  await page.click('#burger');
+  for (let i = 0; i < 10; i++) if (await page.isEnabled('#size-up')) await page.click('#size-up');
+  assert.match(await page.textContent('#size-val'), /١٥٠٪/);
+  assert.equal(await page.isDisabled('#size-up'), true, 'stops at the biggest size');
+  assert.equal(await ui(), 1.23);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'no sideways scrolling at the biggest size');
+  await page.click('[data-act="new-game"]');
+  assert.equal((await state(page)).size, 1.5, 'a new game keeps the size');
   assert.deepEqual(errors, []);
   await context.close();
 });
@@ -540,15 +657,15 @@ test('team names: the fields are typeable, typed names are used, empty fields ta
   assert.equal(await page.inputValue('#team-name-0'), '', 'field starts empty so typing is obvious');
   assert.equal(await page.getAttribute('#team-name-0', 'placeholder'), 'الصقور');
   await page.click('#team-name-0');
-  await page.keyboard.type('عائلة عودة');
+  await page.keyboard.type('عائلة النور');
   await page.click('.field:has(#team-name-2)');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'team-name-2', 'tapping anywhere on the field focuses it');
-  await page.keyboard.type('ازدهار');
+  await page.keyboard.type('الصقور');
   for (let i = 0; i < 3; i++) await page.click('#go');
   await page.click('#go');
   const s = await state(page);
-  assert.deepEqual(s.game.teams.map((t) => t.name), ['عائلة عودة', 'الفهود', 'ازدهار']);
-  assert.match(await page.textContent('#scores'), /عائلة عودة/);
+  assert.deepEqual(s.game.teams.map((t) => t.name), ['عائلة النور', 'الفهود', 'الصقور']);
+  assert.match(await page.textContent('#scores'), /عائلة النور/);
   assert.deepEqual(errors, []);
   await context.close();
 });
@@ -607,12 +724,12 @@ test('big group: 10 teams of 3 play a full round, with the saboteur picked first
   assert.equal(s.game.total, 30);
   assert.deepEqual(s.game.teams.map((t) => t.name).slice(-2), ['القمم', 'العواصف'], 'default names for all 10 teams');
   // team 1 answers; team 8 sabotages with rush through the team picker
-  let qq = await openQuestion(page, { diff: 1 });
-  await page.click('[data-act="sheet-theirs"]');
-  assert.equal(await page.locator('#sheet [data-act="use"]').count(), 0, 'no card list until a team is picked');
+  let qq = await openQuestion(page, { diff: 1, prep: true });
+  assert.equal(await page.locator('#view [data-act="use"]').count(), 0, 'no card list until a team is picked');
   await page.click('[data-act="sabo-team"][data-id="7"]');
-  await page.click('[data-act="use"][data-id="rush"][data-team="7"]');
+  await page.click('#view [data-act="use"][data-id="rush"][data-team="7"]');
   assert.equal((await q(page)).rushBy, 7);
+  await startQuestion(page);
   await choose(page, wrongOf(qq));
   assert.equal(await page.locator('[data-act="steal"]').count(), 9, 'all nine other teams can steal');
   await page.click('[data-act="steal"][data-id="9"]');
@@ -669,7 +786,7 @@ test('two teams with every category can play up to all the questions (97 rounds)
 });
 
 /* ---------- layout ---------- */
-for (const width of [320, 390, 1440]) {
+for (const width of [320, 360, 390, 1440]) {
   test(`layout at ${width}px: no sideways scrolling and nothing overlaps`, async () => {
     const { page, context, errors } = await open({ viewport: { width, height: width < 800 ? 760 : 900 } });
     const problems = [];
@@ -677,24 +794,39 @@ for (const width of [320, 390, 1440]) {
       const r = await page.evaluate(() => {
         const box = (sel) => { const e = document.querySelector(sel); if (!e || e.hidden || !e.offsetParent) return null; const b = e.getBoundingClientRect(); return b.width ? b : null; };
         const hit = (a, b) => a && b && a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
-        const pairs = [['.back', '.halo'], ['.clock', '.halo'], ['.burger', '.logo'], ['.toplink', '.logo']];
+        const pairs = [['.back', '.halo'], ['.clock', '.halo'], ['.burger', '.logo'], ['.fs', '.logo'], ['.burger', '.fs'], ['.toplink', '.logo']];
+        const oneLine = (sel) => {
+          const e = document.querySelector(sel);
+          const range = document.createRange();
+          range.selectNodeContents(e);
+          const fs = parseFloat(getComputedStyle(e).fontSize);
+          return [...range.getClientRects()].every((x) => x.height < fs * 2) && range.getBoundingClientRect().height < fs * 2;
+        };
         return {
           scroll: document.documentElement.scrollWidth > window.innerWidth,
-          overlaps: pairs.filter(([a, b]) => hit(box(a), box(b))).map((p) => p.join(' / '))
+          overlaps: pairs.filter(([a, b]) => hit(box(a), box(b))).map((p) => p.join(' / ')),
+          wrapped: ['.logo', '.toplink'].filter((sel) => !oneLine(sel)),
+          // the title needs breathing room on both sides, not just "not touching"
+          tight: [['.toplink', '.logo'], ['.logo', '.top-start']].filter(([a, b]) => {
+            const A = box(a), B = box(b);
+            return A && B && Math.max(A.left, B.left) - Math.min(A.right, B.right) < 8;
+          }).map((p) => p.join(' / '))
         };
       });
       if (r.scroll) problems.push(`${label}: page scrolls sideways`);
+      r.wrapped.forEach((sel) => problems.push(`${label}: ${sel} wraps onto two lines`));
+      r.tight.forEach((o) => problems.push(`${label}: ${o} less than 8px apart`));
       r.overlaps.forEach((o) => problems.push(`${label}: ${o} overlap`));
     };
     await check('categories');
     await setup(page, { teams: 10, rounds: 4, names: ['فريق الصقور الذهبية', 'الفهود', 'النجوم', 'الشهب', 'الموج'], cats: ['general', 'geo', 'islamic', 'arabic', 'gulf'] });
     await check('choose category');
-    const qq = await openQuestion(page, { cat: 'arabic', diff: 3 });
-    await check('question');
-    await page.click('[data-act="sheet-theirs"]');
+    const qq = await openQuestion(page, { cat: 'arabic', diff: 3, prep: true });
+    await check('sabotage step');
     await page.click('[data-act="sabo-team"][data-id="9"]');
     await check('sabotage list');
-    await page.click('#sheet [data-act="close"]');
+    await startQuestion(page);
+    await check('question');
     await choose(page, wrongOf(qq));
     await check('steal offer');
     await page.click('#go');

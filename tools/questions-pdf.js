@@ -8,7 +8,7 @@ const { chromium } = require('playwright');
 
 const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'questions.pdf');
-const NAME = 'مسابقة عودة ازدهار';
+const NAME = 'مسابقة الزنبقات الجميلات';
 
 const sandbox = {};
 new Function('window', fs.readFileSync(path.join(ROOT, 'assets/questions.js'), 'utf8'))(sandbox);

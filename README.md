@@ -1,4 +1,4 @@
-# مسابقة عودة ازدهار
+# مسابقة الزنبقات الجميلات
 
 لعبة أسئلة عربية للعائلة، تلعبها الفرق أمام شاشة واحدة (تلفاز، لابتوب، أو جوال).
 
@@ -7,9 +7,11 @@
 1. اختاروا **الفئات** (ثلاث على الأقل)، ثم عدد الفرق وأسماءها، ووقت كل سؤال، وعدد الجولات، والبطاقات المسموحة.
 2. في كل جولة يجيب كل فريق عن سؤال واحد بالدور.
 3. الفريق صاحب الدور يختار الفئة والصعوبة: سهل ١٠٠، متوسط ٢٠٠، صعب ٣٠٠ نقطة.
-4. اختاروا الإجابة ثم اضغطوا الزر البرتقالي للتأكيد قبل انتهاء الوقت.
-5. أثناء السؤال تستطيع الفرق الأخرى التخريب من زر **«تخريب»** البرتقالي.
+4. **قبل ظهور السؤال** تختار الفرق الأخرى بطاقات التخريب، والوقت لا يبدأ إلا بعد الضغط على **«ابدأ السؤال»**، فلا يضيع وقت الفريق المجيب.
+5. اختاروا الإجابة ثم اضغطوا الزر البرتقالي للتأكيد قبل انتهاء الوقت.
 6. صاحب أعلى نقاط بعد آخر جولة يفوز.
+
+زر **ملء الشاشة** في أعلى اللعبة (بجانب القائمة)، وهو موجود أيضاً داخل القائمة.
 
 ## البطاقات (كل فريق يستخدم كل بطاقة مرة واحدة في اللعبة)
 
@@ -22,14 +24,14 @@
 | حذف إجابتين | تحذف خيارين خاطئين |
 | فرصة ثانية | محاولة أخرى إن أخطأتم |
 | تغيير السؤال | سؤال آخر من نفس الفئة والصعوبة، ويزول الخلط والضباب والاستعجال |
-| الدرع | يمنع التخريب عنكم، ويُبطل الكذبة والخلط والضباب |
+| الدرع | يُبطل الكذبة والخلط والضباب، ويمنع سرقة السؤال |
 
-### بطاقات التخريب · يستخدمها المنافسون ضد الفريق الذي يجيب
+### بطاقات التخريب · يستخدمها المنافسون قبل ظهور السؤال
 
 | البطاقة | ماذا تفعل |
 |---|---|
-| الكذبة | يرى فريقكم الإجابة سراً ويحاول تضليلهم؛ إن أخطأوا تأخذون النقاط |
-| الاستعجال | نصف الوقت المتبقي فقط |
+| الكذبة | يرى فريقكم السؤال وإجابته سراً ويحاول تضليلهم؛ إن أخطأوا تأخذون النقاط |
+| الاستعجال | يبدأ الفريق السؤال بنصف الوقت فقط |
 | التجميد | لا يستطيعون استخدام بطاقات المساعدة في هذا السؤال (ولا الدرع) |
 | الخلط | تتبدل أماكن الإجابات كل ٣ ثوانٍ |
 | الضباب | تختفي الإجابات خلف ضباب ينقشع خلال ١٠ ثوانٍ |
@@ -70,4 +72,4 @@ npm test
 
 ---
 
-**English:** a single-screen Arabic family quiz for 2–10 teams. Plain HTML/CSS/JS with no build step: open `index.html`. Questions live in `assets/questions.js` (13 categories including math, 195 questions). `npm test` runs 37 tests covering scoring, every card, the timer, refresh-resume, saves from older versions and phone layouts.
+**English:** a single-screen Arabic family quiz for 2–10 teams. Plain HTML/CSS/JS with no build step: open `index.html`. Questions live in `assets/questions.js` (13 categories including math, 195 questions). Sabotage is chosen on a step before each question, with the clock stopped, so it never eats the answering team's time. The game fills the whole window, sizes itself to the screen, and has a full-screen button at the top and a display-size setting in the menu. `npm test` runs 42 tests covering scoring, every card, the sabotage step, full screen, screen size, the timer, refresh-resume, saves from older versions and phone layouts.

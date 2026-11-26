@@ -1,4 +1,4 @@
-/* مسابقة عودة ازدهار — منطق اللعبة */
+/* مسابقة الزنبقات الجميلات — منطق اللعبة */
 (function () {
   'use strict';
 
@@ -24,6 +24,8 @@
   const FOG_SECONDS = 10;
   const SCRAMBLE_EVERY = 3;
   const STORE_KEY = 'lamma-family-v1';
+  /* «حجم العرض» in the menu: the player's own size on top of the automatic fit, saved on each device */
+  const SIZE_STEPS = [0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5];
 
   /* help = used by the answering team on its own turn; sabotage = used by the other teams against it */
   const CARDS = {
@@ -32,12 +34,12 @@
     fifty:    { name: 'حذف إجابتين',  kind: 'help',     desc: 'تحذف إجابتين خاطئتين فيبقى خياران فقط.' },
     life:     { name: 'فرصة ثانية',   kind: 'help',     desc: 'إذا أخطأتم تحصلون على محاولة أخرى في نفس السؤال.' },
     swap:     { name: 'تغيير السؤال', kind: 'help',     desc: 'تستبدل السؤال بآخر من نفس الفئة والصعوبة، ويبدأ الوقت من جديد ويزول الخلط والضباب والاستعجال.' },
-    shield:   { name: 'الدرع',        kind: 'help',     desc: 'يمنع التخريب عنكم في هذا السؤال، ويُبطل الكذبة والخلط والضباب إن استُخدمت عليكم.' },
-    lie:      { name: 'الكذبة',       kind: 'sabotage', desc: 'يرى فريقكم الإجابة سراً ثم يحاول تضليل الفريق المجيب. إن أخطأوا تأخذون نقاط السؤال.' },
-    rush:     { name: 'الاستعجال',    kind: 'sabotage', desc: 'تقطع نصف الوقت المتبقي على الفريق المجيب.' },
+    shield:   { name: 'الدرع',        kind: 'help',     desc: 'يُبطل الكذبة والخلط والضباب إن استُخدمت عليكم، ويمنع سرقة السؤال منكم.' },
+    lie:      { name: 'الكذبة',       kind: 'sabotage', desc: 'يرى فريقكم السؤال وإجابته سراً قبل ظهوره، ثم يحاول تضليل الفريق المجيب. إن أخطأوا تأخذون نقاط السؤال.' },
+    rush:     { name: 'الاستعجال',    kind: 'sabotage', desc: 'يبدأ الفريق المجيب السؤال بنصف الوقت فقط.' },
     freeze:   { name: 'التجميد',      kind: 'sabotage', desc: 'يمنع الفريق المجيب من استخدام بطاقات المساعدة في هذا السؤال، ومنها الدرع.' },
     scramble: { name: 'الخلط',        kind: 'sabotage', desc: 'تتبدّل أماكن الإجابات كل ٣ ثوانٍ حتى يجيب الفريق.' },
-    fog:      { name: 'الضباب',       kind: 'sabotage', desc: 'تختفي الإجابات خلف ضباب ينقشع تدريجياً خلال ١٠ ثوانٍ.' },
+    fog:      { name: 'الضباب',       kind: 'sabotage', desc: 'تظهر الإجابات خلف ضباب ينقشع تدريجياً خلال ١٠ ثوانٍ.' },
     steal:    { name: 'السرقة',       kind: 'sabotage', desc: 'إذا أخطأ الفريق المجيب تجيبون أنتم عن نفس السؤال وتأخذون نقاطه. تظهر تلقائياً عند الخطأ.' }
   };
   const CARD_ORDER = ['time', 'double', 'fifty', 'life', 'swap', 'shield', 'lie', 'rush', 'freeze', 'scramble', 'fog', 'steal'];
@@ -63,6 +65,8 @@
     back: svg('<path d="m9 6 6 6-6 6"/>'),
     pencil: svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>'),
     board: svg('<path d="M5 20V10M12 20V4M19 20v-7"/>'),
+    expand: svg('<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>'),
+    shrink: svg('<path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/>'),
     cards: svg('<rect x="4" y="6" width="11" height="14" rx="2"/><path d="M9 3.5h9a2 2 0 0 1 2 2V17"/>')
   };
 
@@ -99,7 +103,8 @@
       settings: { cats: [], teams: 2, names: DEFAULT_NAMES.slice(), time: 30, rounds: 6, cards: CARD_ORDER.slice() },
       game: null,
       seen: {},
-      sound: true
+      sound: true,
+      size: 1
     };
   }
 
@@ -125,6 +130,7 @@
     if (s.screen === 'question' && !(s.game && s.game.q)) s.screen = 'turn';
     s.step = Math.min(Math.max(0, s.step | 0), STEPS.length - 1);
     s.seen = s.seen || {};
+    s.size = SIZE_STEPS.includes(Number(s.size)) ? Number(s.size) : 1;
     return s;
   }
 
@@ -237,13 +243,21 @@
     return g.teams.map((_, i) => i).filter((i) => i !== g.turn && hasCard(i, 'steal'));
   }
 
+  /* sabotage is chosen before the question appears, so it never eats the answering team's time */
+  function saboCards() { return SABOTAGE.filter((id) => id !== 'steal' && cardEnabled(id)); }
+  function saboPossible() {
+    const g = G();
+    return g.teams.some((_, i) => i !== g.turn && saboCards().some((id) => hasCard(i, id)));
+  }
+
   function canUse(ti, id) {
     const g = G(), q = Q();
     const no = (why) => ({ ok: false, why });
     if (!cardEnabled(id)) return no('غير مفعّلة');
     if (g.teams[ti].used.includes(id)) return no('استُخدمت');
-    if (S.screen !== 'question' || !q || q.phase !== 'answer') return no('أثناء السؤال فقط');
+    const phase = S.screen === 'question' && q ? q.phase : null;
     if (CARDS[id].kind === 'help') {
+      if (phase !== 'answer') return no('أثناء السؤال فقط');
       if (ti !== g.turn) return no('في دوركم فقط');
       if (q.frozenBy != null) return no('مجمّدة في هذا السؤال');
       if (id === 'double' && q.double) return no('مفعّلة الآن');
@@ -256,6 +270,7 @@
     } else {
       if (ti === g.turn) return no('في دور المنافسين');
       if (id === 'steal') return no('عند الخطأ');
+      if (phase !== 'prep') return no('قبل السؤال فقط');
       if (q.shield) return no('محميون بالدرع');
       if (q[SABOTAGE_FIELD[id]] != null) return no('استُخدمت على هذا السؤال');
       if ((id === 'rush' || id === 'fog') && q.timeLeft < 6) return no('الوقت قليل أصلاً');
@@ -402,7 +417,7 @@
       const group = (ids) => ids.map((id) => pill({ act: 'card-toggle', id, label: CARDS[id].name, icon: ICON[id], pressed: st.cards.includes(id) })).join('');
       body = `<p class="group-label"><b>بطاقات المساعدة</b> · يستخدمها الفريق في دوره</p>
         <div class="opts opts-3 opts-tight">${group(HELP)}</div>
-        <p class="group-label"><b>بطاقات التخريب</b> · يستخدمها المنافسون ضد الفريق الذي يجيب</p>
+        <p class="group-label"><b>بطاقات التخريب</b> · يستخدمها المنافسون قبل ظهور السؤال</p>
         <div class="opts opts-3 opts-tight">${group(SABOTAGE)}</div>
         <p class="note">${hint}</p>`;
     }
@@ -423,7 +438,7 @@
     })).join('');
     const wide = st.cats.length > 4 ? 'opts-wide' : 'short';
     const sabo = SABOTAGE.some(cardEnabled) && g.round === 1
-      ? '<p class="note">أثناء السؤال تستطيع الفرق الأخرى التخريب عليكم من زر «تخريب»، والدرع يحميكم.</p>'
+      ? '<p class="note">قبل ظهور السؤال تستطيع الفرق الأخرى التخريب عليكم، والوقت لا يبدأ إلا بعد ذلك.</p>'
       : '';
     return head(`الجولة ${ar(g.round)} من ${ar(st.rounds)} · دور <b>فريق ${teamName(g.turn)}</b>`, 'اختاروا فئة السؤال')
       + `<div class="opts ${wide}">${cats}</div>`
@@ -487,6 +502,7 @@
   function viewQuestion() {
     const g = G(), q = Q();
     if (q.phase === 'lie') return viewLie();
+    if (q.phase === 'prep') return viewPrep();
     const cat = CAT[q.cat];
     const pts = POINTS[q.d] * (q.double ? 2 : 1);
     let eyebrow;
@@ -517,30 +533,48 @@
       + `<div class="opts ${short}${fx}" id="answers" style="--fog:${fog.toFixed(2)}px">${opts}</div>` + below;
   }
 
+  /* only help cards during the question: sabotage was already chosen before it appeared */
   function cardChips() {
     const g = G();
     const helpCards = HELP.filter(cardEnabled);
-    const saboCards = SABOTAGE.filter((id) => id !== 'steal' && cardEnabled(id));
-    if (!helpCards.length && !saboCards.length) return '';
+    if (!helpCards.length) return '';
     const mine = helpCards.filter((id) => hasCard(g.turn, id)).length;
-    const theirs = g.teams.reduce((n, _, i) => n + (i === g.turn ? 0 : saboCards.filter((id) => hasCard(i, id)).length), 0);
-    let out = '<div class="actions">';
-    if (helpCards.length) {
-      out += `<button type="button" class="chip" data-act="sheet-mine" ${mine ? '' : 'disabled'}>${ICON.cards}<span>مساعدة ${teamName(g.turn)}</span><span class="chip-n">${ar(mine)}</span></button>`;
-    }
-    if (saboCards.length) {
-      out += `<button type="button" class="chip is-hot" data-act="sheet-theirs" ${theirs ? '' : 'disabled'}>${ICON.rush}<span>تخريب</span><span class="chip-n">${ar(theirs)}</span></button>`;
-    }
-    return out + '</div>';
+    return `<div class="actions"><button type="button" class="chip" data-act="sheet-mine" ${mine ? '' : 'disabled'}>${ICON.cards}<span>مساعدة ${teamName(g.turn)}</span><span class="chip-n">${ar(mine)}</span></button></div>`;
   }
 
   function viewLie() {
     const g = G(), q = Q();
     const liar = teamName(q.lie);
     return head(`بطاقة الكذبة · فريق ${liar}`, `يا فريق ${teamName(g.turn)}، أديروا وجوهكم عن الشاشة`)
-      + `<p class="lead">على فريق <b>${liar}</b> وحده أن يضغط مطوّلاً على الزر ليرى الإجابة الصحيحة، ثم يحاول إقناعكم بإجابة قد تكون صحيحة وقد تكون كذبة. إن أخطأتم تذهب نقاط السؤال إليهم. الوقت متوقف الآن.</p>`
-      + `<button type="button" class="pill peek" id="peek"><span class="peek-hide">اضغطوا مطوّلاً لكشف الإجابة</span><span class="peek-show" dir="auto">${esc(q.options[q.correct])}</span></button>`
-      + '<p class="note">عندما تنتهون اضغطوا الزر البرتقالي للعودة إلى السؤال.</p>';
+      + `<p class="lead">على فريق <b>${liar}</b> وحده أن يضغط مطوّلاً على الزر ليرى السؤال وإجابته الصحيحة، ثم يحاول أثناء السؤال إقناعكم بإجابة قد تكون صحيحة وقد تكون كذبة. إن أخطأتم تذهب نقاط السؤال إليهم. الوقت لم يبدأ بعد.</p>`
+      + `<button type="button" class="pill peek" id="peek"><span class="peek-hide">اضغطوا مطوّلاً لكشف السؤال والإجابة</span><span class="peek-show"><span class="peek-q" dir="auto">${esc(q.text)}</span><b class="peek-a" dir="auto">${esc(q.options[q.correct])}</b></span></button>`
+      + '<p class="note">عندما تنتهون اضغطوا الزر البرتقالي للمتابعة.</p>';
+  }
+
+  /* the step between choosing the question and seeing it: the other teams sabotage here, with the clock not yet running */
+  function viewPrep() {
+    const g = G(), q = Q();
+    const others = g.teams.map((_, i) => i).filter((i) => i !== g.turn);
+    const ids = saboCards();
+    const block = (i) => `<p class="sabo-head">فريق <b>${teamName(i)}</b> يخرّب بـ</p>
+      <div class="opts opts-tight sabo">${ids.map((id) => {
+        const chk = canUse(i, id);
+        const used = g.teams[i].used.includes(id);
+        return `<button type="button" class="pill pill-sm ${used ? 'is-used' : ''}" data-act="use" data-id="${id}" data-team="${i}" ${chk.ok ? '' : 'disabled'} title="${esc(chk.ok ? CARDS[id].desc : chk.why)}"><span class="pill-ic">${ICON[id]}</span><span>${CARDS[id].name}${chk.ok ? '' : `<small>${chk.why}</small>`}</span></button>`;
+      }).join('')}</div>`;
+    /* with many teams, pick the saboteur first so the list stays short */
+    const pickFirst = others.length >= 3;
+    const canSabotage = (i) => ids.some((id) => canUse(i, id).ok);
+    const body = pickFirst
+      ? `<p class="sabo-head">من الفريق الذي يخرّب؟</p>
+        <div class="opts opts-tight sabo">${others.map((i) => pill({ act: 'sabo-team', id: i, label: teamName(i), pressed: ui.saboTeam === i, cls: 'pill-sm', disabled: !canSabotage(i) })).join('')}</div>
+        ${ui.saboTeam != null && others.includes(ui.saboTeam) ? block(ui.saboTeam) : ''}`
+      : others.map(block).join('');
+    const how = pickFirst ? 'اختاروا الفريق الذي يخرّب ثم بطاقته' : 'يضغط الفريق الذي يريد التخريب على بطاقته';
+    return head(`قبل السؤال · ${CAT[q.cat].name} · ${ar(POINTS[q.d])} نقطة`, `هل يريد أحد التخريب على فريق ${teamName(g.turn)}؟`)
+      + `<p class="lead">${how}، أو اضغطوا «ابدأ السؤال» إن لم يرد أحد. الوقت لا يبدأ إلا عند ظهور السؤال.</p>`
+      + tagsHtml() + body
+      + `<p class="note">لكل نوع بطاقة واحدة فقط في السؤال · <button type="button" class="linkbtn" data-act="rules">ماذا تفعل كل بطاقة؟</button></p>`;
   }
 
   /* ---------- round & final ---------- */
@@ -596,28 +630,7 @@
       return `<p class="eyebrow">كل بطاقة تُستخدم مرة واحدة في اللعبة · الوقت متوقف</p><h2 class="title" id="sheetTitle">بطاقات المساعدة لفريق ${teamName(ti)}</h2>
         ${frozen ? `<p class="lead">فريق <b>${teamName(Q().frozenBy)}</b> جمّد بطاقاتكم في هذا السؤال.</p>` : ''}
         <ul class="rows">${HELP.filter(cardEnabled).map((id) => cardRow(ti, id)).join('')}</ul>
-        ${SABOTAGE.some(cardEnabled) ? '<p class="note">بطاقات التخريب الخاصة بكم تستخدمونها من زر «تخريب» أثناء دور فريق آخر.</p>' : ''}`;
-    }
-    if (kind === 'theirs') {
-      const others = g.teams.map((_, i) => i).filter((i) => i !== g.turn);
-      const ids = SABOTAGE.filter(cardEnabled);
-      const teamBlock = (i) => `<p class="sheet-team">فريق <b>${teamName(i)}</b> يخرّب بـ</p>
-        <div class="opts opts-3 opts-tight sabo">${ids.map((id) => {
-          const chk = canUse(i, id);
-          const used = g.teams[i].used.includes(id);
-          return `<button type="button" class="pill pill-sm ${used ? 'is-used' : ''}" data-act="use" data-id="${id}" data-team="${i}" ${chk.ok ? '' : 'disabled'} title="${esc(chk.ok ? CARDS[id].desc : chk.why)}"><span class="pill-ic">${ICON[id]}</span><span>${CARDS[id].name}${chk.ok ? '' : `<small>${chk.why}</small>`}</span></button>`;
-        }).join('')}</div>`;
-      /* with many teams, pick the saboteur first so the list stays short */
-      const pickFirst = others.length >= 3;
-      const canSabotage = (i) => ids.some((id) => canUse(i, id).ok);
-      const chooser = `<p class="sheet-team">من الفريق الذي يخرّب؟</p>
-        <div class="opts opts-3 opts-tight sabo">${others.map((i) => pill({ act: 'sabo-team', id: i, label: teamName(i), pressed: ui.saboTeam === i, cls: 'pill-sm', disabled: !canSabotage(i) })).join('')}</div>
-        ${ui.saboTeam != null && others.includes(ui.saboTeam) ? teamBlock(ui.saboTeam) : ''}`;
-      return `<p class="eyebrow">ضد فريق ${teamName(g.turn)} · الوقت متوقف</p><h2 class="title" id="sheetTitle">التخريب</h2>
-        <p class="lead">${pickFirst ? 'اختاروا الفريق الذي يخرّب، ثم بطاقته.' : 'الفريق الذي يريد التخريب يضغط على بطاقته.'} لكل نوع بطاقة واحدة فقط في السؤال.</p>
-        ${pickFirst ? chooser : others.map(teamBlock).join('')}
-        <h3>ماذا تفعل كل بطاقة؟</h3>
-        <ul class="legend">${ids.map((id) => `<li><b>${CARDS[id].name}:</b> ${CARDS[id].desc}</li>`).join('')}</ul>`;
+        ${SABOTAGE.some(cardEnabled) ? '<p class="note">بطاقات التخريب الخاصة بكم تستخدمونها قبل ظهور سؤال فريق آخر.</p>' : ''}`;
     }
     if (kind === 'scores') {
       const sub = S.screen === 'setup' ? '' : `الجولة ${ar(g.round)} من ${ar(S.settings.rounds)}`;
@@ -634,7 +647,7 @@
         'في كل جولة يجيب كل فريق عن سؤال واحد بالدور.',
         'الفريق صاحب الدور يختار الفئة والصعوبة: <b>سهل ١٠٠</b>، <b>متوسط ٢٠٠</b>، <b>صعب ٣٠٠</b> نقطة.',
         'اختاروا إجابة ثم اضغطوا الزر البرتقالي لتأكيدها قبل انتهاء الوقت.',
-        'أثناء السؤال تستطيع الفرق الأخرى التخريب من زر «تخريب».',
+        'قبل ظهور السؤال تستطيع الفرق الأخرى التخريب عليكم، والوقت لا يبدأ إلا بعد ذلك.',
         'لا تُخصم نقاط عند الخطأ، لكن قد يسرق فريق آخر السؤال.',
         'الفريق صاحب أعلى نقاط بعد آخر جولة هو الفائز.'
       ];
@@ -643,7 +656,7 @@
         <ol class="rules">${rules.map((r, i) => `<li><span>${ar(i + 1)}</span><span>${r}</span></li>`).join('')}</ol>
         <h3>بطاقات المساعدة · في دوركم</h3>
         <ul class="rows">${rows(HELP)}</ul>
-        <h3>بطاقات التخريب · ضد الفريق الذي يجيب</h3>
+        <h3>بطاقات التخريب · قبل ظهور سؤال المنافس</h3>
         <ul class="rows">${rows(SABOTAGE)}</ul>
         ${window.LAMMA_NO_PDF ? '' : '<p class="note"><a class="linkbtn" href="questions.pdf" target="_blank" rel="noopener">تحميل كل الأسئلة مع الإجابات (PDF)</a></p>'}`;
     }
@@ -655,6 +668,12 @@
     return `${inGame ? `<button type="button" role="menuitem" data-act="scores"><span>النتائج</span>${ICON.board.replace('<svg', '<svg width="18" height="18"')}</button>` : ''}
       <button type="button" role="menuitem" data-act="rules"><span>طريقة اللعب</span></button>
       <button type="button" role="menuitem" data-act="sound"><span>الصوت</span><span class="muted">${S.sound ? 'يعمل' : 'متوقف'}</span></button>
+      ${fsOk() ? `<button type="button" role="menuitem" data-act="fullscreen"><span>ملء الشاشة</span><span class="muted">${fsEl() ? 'مفعّل' : 'متوقف'}</span></button>` : ''}
+      <div class="menu-size" role="group" aria-label="حجم العرض"><span>حجم العرض</span><span class="size-ctl">
+        <button type="button" id="size-down" data-act="size-down" aria-label="تصغير العرض" ${S.size <= SIZE_STEPS[0] ? 'disabled' : ''}>−</button>
+        <span class="size-val" id="size-val">${ar(Math.round(S.size * 100))}٪</span>
+        <button type="button" id="size-up" data-act="size-up" aria-label="تكبير العرض" ${S.size >= SIZE_STEPS[SIZE_STEPS.length - 1] ? 'disabled' : ''}>+</button>
+      </span></div>
       <button type="button" role="menuitem" data-act="${inGame ? 'ask-new' : 'new-game'}"><span>لعبة جديدة</span></button>`;
   }
 
@@ -663,10 +682,11 @@
     const g = G(), q = Q();
     switch (S.screen) {
       case 'setup': return { enabled: stepValid(), label: S.step === STEPS.length - 1 ? 'ابدأ اللعب' : 'التالي' };
-      case 'turn': return { enabled: !!(g.pick.cat && g.pick.diff), label: 'اعرض السؤال' };
+      case 'turn': return { enabled: !!(g.pick.cat && g.pick.diff), label: saboPossible() ? 'التالي' : 'اعرض السؤال' };
       case 'question':
         if (q.phase === 'answer' || q.phase === 'steal') return { enabled: q.selected != null, label: 'تأكيد الإجابة', timer: true };
-        if (q.phase === 'lie') return { enabled: true, label: 'رجوع للسؤال' };
+        if (q.phase === 'prep') return { enabled: true, label: 'ابدأ السؤال' };
+        if (q.phase === 'lie') return { enabled: true, label: 'متابعة' };
         if (q.phase === 'stealOffer') return { enabled: true, label: 'اكشف الإجابة' };
         if (g.turn === g.teams.length - 1) return { enabled: true, label: g.round >= S.settings.rounds ? 'النتيجة النهائية' : 'نتائج الجولة' };
         return { enabled: true, label: 'السؤال التالي' };
@@ -729,7 +749,8 @@
 
   function viewKey() {
     const q = Q();
-    return [S.screen, S.step, S.screen === 'question' && q ? q.id : '', S.screen === 'question' && q && q.phase === 'lie' ? 'lie' : ''].join('|');
+    const phase = S.screen === 'question' && q && (q.phase === 'lie' || q.phase === 'prep') ? q.phase : '';
+    return [S.screen, S.step, S.screen === 'question' && q ? q.id : '', phase].join('|');
   }
 
   function render() {
@@ -858,6 +879,7 @@
     if (idx == null) { toast('لا توجد أسئلة متبقية بهذه الصعوبة'); return; }
     markUsed(cat, idx);
     g.q = buildQ(cat, diff, idx);
+    if (saboPossible()) { g.q.phase = 'prep'; ui.saboTeam = null; }
     S.screen = 'question';
     lastTick = performance.now();
     render();
@@ -1002,7 +1024,7 @@
       case 'rush':
         q.rushBy = ti;
         q.timeLeft = Math.max(3, Math.ceil(q.timeLeft / 2));
-        toast(`فريق ${teamName(ti)} استعجلكم: نصف الوقت فقط`);
+        toast(`فريق ${teamName(ti)} استعجلكم: ستبدؤون بنصف الوقت`);
         break;
       case 'freeze':
         q.frozenBy = ti;
@@ -1011,8 +1033,7 @@
       case 'scramble':
         q.scrambleBy = ti;
         q.scrambleT = 0;
-        reshuffle(q);
-        toast(`فريق ${teamName(ti)} خلط الإجابات`);
+        toast(`فريق ${teamName(ti)} سيخلط الإجابات`);
         break;
       case 'fog':
         q.fogBy = ti;
@@ -1021,6 +1042,7 @@
         break;
       default: break;
     }
+    if (CARDS[id].kind === 'sabotage') ui.saboTeam = null;
     sfx('card');
     lastTick = performance.now();
     render();
@@ -1041,7 +1063,8 @@
       case 'question': {
         const q = Q();
         if (q.phase === 'answer' || q.phase === 'steal') confirmAnswer();
-        else if (q.phase === 'lie') { q.phase = 'answer'; lastTick = performance.now(); sfx('tap'); render(); }
+        else if (q.phase === 'prep') { q.phase = 'answer'; ui.saboTeam = null; hideToast(); lastTick = performance.now(); sfx('tap'); render(); }
+        else if (q.phase === 'lie') { q.phase = 'prep'; sfx('tap'); render(); }
         else if (q.phase === 'stealOffer') { q.phase = 'reveal'; sfx('tap'); render(); }
         else if (q.phase === 'reveal') { sfx('tap'); nextTurn(); }
         break;
@@ -1065,6 +1088,52 @@
     ui.sheet = null;
     ui.menu = false;
     render();
+  }
+
+  /* ================= full screen ================= */
+  const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+  const fsOk = () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+  function toggleFullscreen() {
+    const root = document.documentElement;
+    const fail = () => toast('لم يسمح المتصفح بملء الشاشة');
+    try {
+      const fn = fsEl()
+        ? (document.exitFullscreen || document.webkitExitFullscreen)
+        : (root.requestFullscreen || root.webkitRequestFullscreen);
+      if (!fn) { fail(); return; }
+      const p = fn.call(fsEl() ? document : root);
+      if (p && typeof p.catch === 'function') p.catch(fail);
+    } catch (e) { fail(); }
+  }
+  function renderFs() {
+    if (!el.fs) return;
+    const on = !!fsEl();
+    const label = on ? 'الخروج من ملء الشاشة' : 'ملء الشاشة';
+    el.fs.hidden = !fsOk();
+    el.fs.innerHTML = on ? ICON.shrink : ICON.expand;
+    el.fs.setAttribute('aria-label', label);
+    el.fs.setAttribute('aria-pressed', on ? 'true' : 'false');
+    el.fs.title = label;
+  }
+
+  /* ================= fit to the screen ================= */
+  /* the layout was drawn for a big screen; scale it to the window so a laptop (e.g. 1440x900 at 200%
+     Windows scaling) doesn't look zoomed in and a TV in full screen gets bigger, easier-to-read text */
+  function fitScreen() {
+    const w = window.innerWidth, h = window.innerHeight;
+    const auto = w <= 640 ? 1 : Math.min(1.25, Math.max(0.75, Math.min(w / 1750, h / 930)));
+    const s = Math.min(1.6, Math.max(0.5, auto * (S ? S.size : 1)));
+    document.documentElement.style.setProperty('--ui', String(Math.round(s * 100) / 100));
+  }
+  function stepSize(dir) {
+    const i = SIZE_STEPS.indexOf(S.size);
+    const next = SIZE_STEPS[Math.min(SIZE_STEPS.length - 1, Math.max(0, i + dir))];
+    if (next === S.size) return;
+    S.size = next;
+    save();
+    fitScreen();
+    renderSheet();
+    sfx('tap');
   }
 
   /* ================= events ================= */
@@ -1119,8 +1188,10 @@
         sfx('tap'); render(); break;
       }
       case 'sheet-mine': ui.sheet = 'mine'; sfx('tap'); render(); break;
-      case 'sheet-theirs': ui.sheet = 'theirs'; ui.saboTeam = null; sfx('tap'); render(); break;
-      case 'sabo-team': ui.saboTeam = Number(id); sfx('tap'); renderSheet(); break;
+      case 'sabo-team': ui.saboTeam = Number(id); sfx('tap'); render(); break;
+      case 'fullscreen': ui.menu = false; renderSheet(); toggleFullscreen(); break;
+      case 'size-down': stepSize(-1); break;
+      case 'size-up': stepSize(1); break;
       case 'use': useCard(Number(t.dataset.team), id); break;
       case 'steal': startSteal(Number(id)); break;
       case 'close': ui.sheet = null; lastTick = performance.now(); render(); break;
@@ -1214,7 +1285,7 @@
   function boot(data) {
     document.documentElement.setAttribute('lang', 'ar');
     document.documentElement.setAttribute('dir', 'rtl');
-    ['card', 'view', 'scores', 'back', 'halo', 'go', 'goLabel', 'clock', 'bar', 'ring', 'ringFill', 'menu', 'sheet', 'sheetBody', 'toast', 'burger']
+    ['card', 'view', 'scores', 'back', 'halo', 'go', 'goLabel', 'clock', 'bar', 'ring', 'ringFill', 'menu', 'sheet', 'sheetBody', 'toast', 'burger', 'fs']
       .forEach((id) => { el[id] = document.getElementById(id); });
 
     S = normalize(data && data.settings ? data : load());
@@ -1229,7 +1300,15 @@
     el.card.addEventListener('keydown', (e) => { if (e.target.id === 'peek' && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); e.stopPropagation(); setPeek(true); } });
     el.card.addEventListener('keyup', (e) => { if (e.target.id === 'peek') setPeek(false); });
     document.addEventListener('visibilitychange', () => { lastTick = performance.now(); });
+    ['fullscreenchange', 'webkitfullscreenchange'].forEach((ev) => document.addEventListener(ev, () => {
+      lastTick = performance.now();
+      renderFs();
+      if (ui.menu) renderSheet();
+    }));
 
+    fitScreen();
+    window.addEventListener('resize', fitScreen);
+    renderFs();
     render();
     setInterval(tick, 200);
   }
